@@ -137,7 +137,9 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
 
   // In-canvas button tracking
   const [isHoveringButton, setIsHoveringButton] = useState(false);
+  const isHoveringButtonRef = useRef(false);
   const [dwellProgress, setDwellProgress] = useState(0);
+  const dwellProgressRef = useRef(0);
   const [buttonFeedback, setButtonFeedback] = useState(false);
   const actionButtonRef = useRef<HTMLButtonElement | null>(null);
   const lastButtonTriggerRef = useRef(0);
@@ -817,54 +819,85 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     if (actionButtonRef.current && data.indexTip) {
       const btn = actionButtonRef.current;
       const btnRect = btn.getBoundingClientRect();
-      const screenPos = getScreenCoordinatesFromNormalized(data.indexTip.x, data.indexTip.y);
+      const indexPos = getScreenCoordinatesFromNormalized(data.indexTip.x, data.indexTip.y);
+      const thumbPos = data.thumbTip ? getScreenCoordinatesFromNormalized(data.thumbTip.x, data.thumbTip.y) : indexPos;
 
-      if (screenPos) {
-        // Generous padding around the button (45px)
-        isOverButton = (
-          screenPos.screenX >= btnRect.left - 45 &&
-          screenPos.screenX <= btnRect.right + 45 &&
-          screenPos.screenY >= btnRect.top - 45 &&
-          screenPos.screenY <= btnRect.bottom + 45
+      if (indexPos) {
+        const midX = thumbPos ? (indexPos.screenX + thumbPos.screenX) / 2 : indexPos.screenX;
+        const midY = thumbPos ? (indexPos.screenY + thumbPos.screenY) / 2 : indexPos.screenY;
+
+        const pad = 35; // Generous comfortable margin around button
+        const checkInside = (sx: number, sy: number) => (
+          sx >= btnRect.left - pad &&
+          sx <= btnRect.right + pad &&
+          sy >= btnRect.top - pad &&
+          sy <= btnRect.bottom + pad
         );
+
+        isOverButton = checkInside(indexPos.screenX, indexPos.screenY) ||
+                       (thumbPos ? checkInside(thumbPos.screenX, thumbPos.screenY) : false) ||
+                       checkInside(midX, midY);
       }
-      setIsHoveringButton(isOverButton);
-    } else {
-      setIsHoveringButton(false);
     }
 
+    // Only update hover state when it changes (eliminates React re-render lag)
+    if (isOverButton !== isHoveringButtonRef.current) {
+      isHoveringButtonRef.current = isOverButton;
+      setIsHoveringButton(isOverButton);
+    }
+
+    // Determine current 2-finger pinch state
+    const directTipDist = data.thumbTip && data.indexTip
+      ? Math.hypot(data.thumbTip.x - data.indexTip.x, data.thumbTip.y - data.indexTip.y)
+      : 1.0;
+    const isPinchingNow = data.isPinching || directTipDist < 0.095 || data.isTwoFingerOnlyPinch;
+
     // Reset pinch release guard when student opens fingers
-    if (!data.isPinching) {
+    if (!isPinchingNow) {
       pinchMustReleaseRef.current = false;
     }
 
     const now = Date.now();
-    const canTriggerButton = (now - lastButtonTriggerRef.current > 2000) && !pinchMustReleaseRef.current;
+    const canTriggerButton = (now - lastButtonTriggerRef.current > 750) && !pinchMustReleaseRef.current;
 
-    // Interaction A: Over Action Button (2-finger pinch or 0.7s dwell inside the video)
+    // When hovering over the button, ensure pen does not draw lines across the button!
     if (isOverButton) {
-      const isTwoFingerPinchOverBtn = (data.isPinching || data.isTwoFingerOnlyPinch);
-      if (isTwoFingerPinchOverBtn && canTriggerButton) {
-        dwellStartTimeRef.current = null;
-        setDwellProgress(100);
-        setButtonFeedback(true);
+      if (isPenDownRef.current) {
+        isPenDownRef.current = false;
+        setIsPenDown(false);
+      }
+      lastDrawPosRef.current = null;
+
+      // Interaction A1: IMMEDIATE 2-FINGER PINCH 🤏 (سبابة وإبهام) over button!
+      if (isPinchingNow && canTriggerButton) {
         pinchMustReleaseRef.current = true;
         lastButtonTriggerRef.current = now;
+        dwellStartTimeRef.current = null;
+        if (dwellProgressRef.current !== 0) {
+          dwellProgressRef.current = 0;
+          setDwellProgress(0);
+        }
+        setButtonFeedback(true);
         setTimeout(() => setButtonFeedback(false), 500);
         audioService.playPopSound();
         handleToggleButton(true);
       } else if (!dwellStartTimeRef.current) {
         dwellStartTimeRef.current = now;
       } else {
+        // Interaction A2: DWELL FALLBACK (Holding hand steadily over button for 1.0s)
         const elapsed = now - dwellStartTimeRef.current;
-        const progress = Math.min(100, Math.round((elapsed / 700) * 100)); // 0.7s dwell
-        setDwellProgress(progress);
-        if (elapsed >= 700 && canTriggerButton) {
-          dwellStartTimeRef.current = null;
-          setDwellProgress(0);
-          setButtonFeedback(true);
+        const progress = Math.min(100, Math.round((elapsed / 1000) * 100));
+        if (Math.abs(progress - dwellProgressRef.current) >= 5) {
+          dwellProgressRef.current = progress;
+          setDwellProgress(progress);
+        }
+        if (elapsed >= 1000 && canTriggerButton) {
           pinchMustReleaseRef.current = true;
           lastButtonTriggerRef.current = now;
+          dwellStartTimeRef.current = null;
+          dwellProgressRef.current = 0;
+          setDwellProgress(0);
+          setButtonFeedback(true);
           setTimeout(() => setButtonFeedback(false), 500);
           audioService.playPopSound();
           handleToggleButton(true);
@@ -872,23 +905,29 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       }
     } else {
       dwellStartTimeRef.current = null;
-      setDwellProgress(0);
+      if (dwellProgressRef.current !== 0) {
+        dwellProgressRef.current = 0;
+        setDwellProgress(0);
+      }
     }
 
-    // Interaction B: Air Pinch Gesture (Only when NOT over button)
-    // When session is NOT active: 2-finger pinch held for 1.0s starts session
-    // When session IS active: Air-pinch is disabled to completely prevent conflict with drawing!
+    // Interaction B: Air Pinch Gesture (Only when NOT over button and NOT in active session)
     if (!isOverButton) {
       if (!isSessionActiveRef.current) {
-        if (data.isTwoFingerOnlyPinch && canTriggerButton) {
+        if (isPinchingNow && canTriggerButton) {
           if (!airPinchStartTimeRef.current) {
             airPinchStartTimeRef.current = now;
           } else {
             const elapsed = now - airPinchStartTimeRef.current;
-            const progress = Math.min(100, Math.round((elapsed / 1000) * 100)); // Exactly 1.0s (1000ms)
-            setDwellProgress(progress);
+            const progress = Math.min(100, Math.round((elapsed / 1000) * 100));
+            if (Math.abs(progress - dwellProgressRef.current) >= 5) {
+              dwellProgressRef.current = progress;
+              setDwellProgress(progress);
+            }
             if (elapsed >= 1000) {
+              pinchMustReleaseRef.current = true;
               airPinchStartTimeRef.current = null;
+              dwellProgressRef.current = 0;
               setDwellProgress(0);
               setButtonFeedback(true);
               setTimeout(() => setButtonFeedback(false), 500);
@@ -898,7 +937,8 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
           }
         } else {
           airPinchStartTimeRef.current = null;
-          if (!isOverButton) {
+          if (dwellProgressRef.current !== 0) {
+            dwellProgressRef.current = 0;
             setDwellProgress(0);
           }
         }
@@ -1404,7 +1444,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             muted
             onLoadedMetadata={handleVideoLoadedMetadata}
             onResize={handleVideoLoadedMetadata}
-            className={`absolute inset-0 w-full h-full object-contain -scale-x-100 transition-opacity duration-300 pointer-events-none ${
+            className={`absolute inset-0 w-full h-full object-fill -scale-x-100 transition-opacity duration-300 pointer-events-none ${
               showVideo && inputMethod === 'hand' ? 'opacity-90' : 'opacity-0'
             }`}
             style={{
@@ -1418,7 +1458,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
               ref={guideCanvasRef}
               width={videoDims.width}
               height={videoDims.height}
-              className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10 transition-all duration-200"
+              className="absolute inset-0 w-full h-full object-fill pointer-events-none z-10 transition-all duration-200"
               style={{
                 filter:
                   inputMethod === 'touch_mouse'
@@ -1446,7 +1486,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerUp}
-              className={`absolute inset-0 w-full h-full object-contain cursor-crosshair z-20 touch-none ${
+              className={`absolute inset-0 w-full h-full object-fill cursor-crosshair z-20 touch-none ${
                 inputMethod === 'touch_mouse' ? 'pointer-events-auto' : 'pointer-events-none'
               }`}
             />
@@ -1457,7 +1497,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             ref={skeletonCanvasRef}
             width={videoDims.width}
             height={videoDims.height}
-            className={`absolute inset-0 w-full h-full object-contain pointer-events-none z-30 ${
+            className={`absolute inset-0 w-full h-full object-fill pointer-events-none z-30 ${
               inputMethod === 'touch_mouse' ? 'hidden' : 'block'
             }`}
           />

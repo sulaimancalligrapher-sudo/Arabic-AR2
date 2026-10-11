@@ -130,6 +130,14 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
   const userDrawCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const guideCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const stageFrameRef = useRef<HTMLDivElement | null>(null);
+
+  // Performance & Throttle Refs to prevent lag on mobile and tablet
+  const isHoveringButtonRef = useRef(false);
+  const dwellProgressRef = useRef(0);
+  const accuracyRef = useRef(0);
+  const coverageRef = useRef(0);
+  const lastAccuracyUpdateRef = useRef(0);
 
   // State Refs to prevent 60FPS loop stale closures
   const isPenDownRef = useRef(false);
@@ -386,8 +394,9 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
 
     lastDrawPosRef.current = { x: pixelX, y: pixelY };
 
-    // Check hit radius
+    // Check hit radius with squared distance (no Math.hypot in tight loops)
     const radius = drawingEngineService.getToleranceRadius(drawing.tolerance);
+    const rSquared = radius * radius;
     let hitFound = false;
 
     const startX = Math.max(0, Math.floor(pixelX - radius));
@@ -396,10 +405,13 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
     const endY = Math.min(height - 1, Math.ceil(pixelY + radius));
 
     for (let y = startY; y <= endY; y++) {
+      const dy = y - pixelY;
+      const dy2 = dy * dy;
+      const rowOffset = y * width;
       for (let x = startX; x <= endX; x++) {
-        const dist = Math.hypot(x - pixelX, y - pixelY);
-        if (dist <= radius) {
-          const index = y * width + x;
+        const dx = x - pixelX;
+        if (dx * dx + dy2 <= rSquared) {
+          const index = rowOffset + x;
           if (targetMask[index] === 1) {
             coveredSetRef.current.add(index);
             hitFound = true;
@@ -416,7 +428,6 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
     // Calculate coverage and steadiness
     const currentCovered = coveredSetRef.current.size;
     const covRatio = Math.min(100, Math.round((currentCovered / totalTargetPixels) * 100));
-    setCoverage(covRatio);
 
     const steadiness = totalSamplesRef.current > 0
       ? Math.round((onTargetSamplesRef.current / totalSamplesRef.current) * 100)
@@ -424,9 +435,16 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
 
     // Composite accuracy score
     const currentAccuracy = Math.min(100, Math.round(covRatio * 0.7 + steadiness * 0.3));
-    setAccuracy(currentAccuracy);
+    accuracyRef.current = currentAccuracy;
+    coverageRef.current = covRatio;
 
-    // NOTE: Auto-termination removed! User stays in full control and finishes when clicking the button.
+    // Throttle React state update to every 250ms to eliminate UI lag while drawing
+    const now = Date.now();
+    if (now - lastAccuracyUpdateRef.current > 250) {
+      lastAccuracyUpdateRef.current = now;
+      setCoverage(covRatio);
+      setAccuracy(currentAccuracy);
+    }
   }, [brushColor, brushSize, drawing.tolerance]);
 
   // Hand update callback
@@ -457,58 +475,91 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
     if (actionButtonRef.current && data.indexTip) {
       const btn = actionButtonRef.current;
       const btnRect = btn.getBoundingClientRect();
-      const cvs = skeletonCanvasRef.current || userDrawCanvasRef.current;
-      if (cvs) {
-        const cvsRect = cvs.getBoundingClientRect();
-        // Since both video and canvas fill the exact same container with aspect-contain:
-        const tipScreenX = cvsRect.left + data.indexTip.x * cvsRect.width;
-        const tipScreenY = cvsRect.top + data.indexTip.y * cvsRect.height;
+      const frameEl = stageFrameRef.current || containerRef.current;
+      if (frameEl) {
+        const frameRect = frameEl.getBoundingClientRect();
+        // Since stageFrame matches video aspect ratio 1:1, normalized coordinates map directly:
+        const indexScreenX = frameRect.left + data.indexTip.x * frameRect.width;
+        const indexScreenY = frameRect.top + data.indexTip.y * frameRect.height;
 
-        // Generous touch margin around the button
-        isOverActionButton = (
-          tipScreenX >= btnRect.left - 25 &&
-          tipScreenX <= btnRect.right + 25 &&
-          tipScreenY >= btnRect.top - 25 &&
-          tipScreenY <= btnRect.bottom + 25
+        const thumbScreenX = data.thumbTip ? (frameRect.left + data.thumbTip.x * frameRect.width) : indexScreenX;
+        const thumbScreenY = data.thumbTip ? (frameRect.top + data.thumbTip.y * frameRect.height) : indexScreenY;
+
+        const midScreenX = (indexScreenX + thumbScreenX) / 2;
+        const midScreenY = (indexScreenY + thumbScreenY) / 2;
+
+        const pad = 35; // Generous comfortable margin around button
+        const checkInside = (sx: number, sy: number) => (
+          sx >= btnRect.left - pad &&
+          sx <= btnRect.right + pad &&
+          sy >= btnRect.top - pad &&
+          sy <= btnRect.bottom + pad
         );
+
+        isOverActionButton = checkInside(indexScreenX, indexScreenY) ||
+                             checkInside(thumbScreenX, thumbScreenY) ||
+                             checkInside(midScreenX, midScreenY);
       }
-      setIsHoveringButton(isOverActionButton);
-    } else {
-      setIsHoveringButton(false);
     }
 
-    // Reset pinch release guard when student opens fingers
-    if (!data.isPinching) {
+    // Only update hover state when it changes (eliminates React re-render lag)
+    if (isOverActionButton !== isHoveringButtonRef.current) {
+      isHoveringButtonRef.current = isOverActionButton;
+      setIsHoveringButton(isOverActionButton);
+    }
+
+    // Determine current 2-finger pinch state
+    const directTipDist = data.thumbTip && data.indexTip
+      ? Math.hypot(data.thumbTip.x - data.indexTip.x, data.thumbTip.y - data.indexTip.y)
+      : 1.0;
+    const isPinchingNow = data.isPinching || directTipDist < 0.095 || data.isTwoFingerOnlyPinch;
+
+    // Reset pinch guard as soon as fingers open
+    if (!isPinchingNow) {
       pinchMustReleaseRef.current = false;
     }
 
     const now = Date.now();
-    const canTriggerButton = (now - lastButtonTriggerRef.current > 1800) && !pinchMustReleaseRef.current;
+    const canTriggerButton = (now - lastButtonTriggerRef.current > 750) && !pinchMustReleaseRef.current;
 
-    // Interaction A: Over Action Button (2-finger pinch or 0.7s dwell inside the video)
+    // When hovering over the button, ensure pen does not draw lines across the button!
     if (isOverActionButton) {
-      const isTwoFingerPinchOverBtn = (data.isPinching || data.isTwoFingerOnlyPinch);
-      if (isTwoFingerPinchOverBtn && canTriggerButton) {
-        dwellStartTimeRef.current = null;
-        setDwellProgress(100);
-        setButtonClickFeedback(true);
+      if (isPenDownRef.current) {
+        isPenDownRef.current = false;
+        setIsPenDown(false);
+      }
+      lastDrawPosRef.current = null;
+
+      // Interaction A1: IMMEDIATE 2-FINGER PINCH 🤏 (سبابة وإبهام) over button!
+      if (isPinchingNow && canTriggerButton) {
         pinchMustReleaseRef.current = true;
         lastButtonTriggerRef.current = now;
+        dwellStartTimeRef.current = null;
+        if (dwellProgressRef.current !== 0) {
+          dwellProgressRef.current = 0;
+          setDwellProgress(0);
+        }
+        setButtonClickFeedback(true);
         setTimeout(() => setButtonClickFeedback(false), 500);
         audioService.playPopSound();
         handleToggleButtonSessionRef.current();
       } else if (!dwellStartTimeRef.current) {
         dwellStartTimeRef.current = now;
       } else {
+        // Interaction A2: DWELL FALLBACK (Holding hand steadily over button for 1.0s)
         const elapsed = now - dwellStartTimeRef.current;
-        const progress = Math.min(100, Math.round((elapsed / 700) * 100)); // 0.7s dwell
-        setDwellProgress(progress);
-        if (elapsed >= 700 && canTriggerButton) {
-          dwellStartTimeRef.current = null;
-          setDwellProgress(0);
-          setButtonClickFeedback(true);
+        const progress = Math.min(100, Math.round((elapsed / 1000) * 100));
+        if (Math.abs(progress - dwellProgressRef.current) >= 5) {
+          dwellProgressRef.current = progress;
+          setDwellProgress(progress);
+        }
+        if (elapsed >= 1000 && canTriggerButton) {
           pinchMustReleaseRef.current = true;
           lastButtonTriggerRef.current = now;
+          dwellStartTimeRef.current = null;
+          dwellProgressRef.current = 0;
+          setDwellProgress(0);
+          setButtonClickFeedback(true);
           setTimeout(() => setButtonClickFeedback(false), 500);
           audioService.playPopSound();
           handleToggleButtonSessionRef.current();
@@ -516,23 +567,29 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
       }
     } else {
       dwellStartTimeRef.current = null;
-      setDwellProgress(0);
+      if (dwellProgressRef.current !== 0) {
+        dwellProgressRef.current = 0;
+        setDwellProgress(0);
+      }
     }
 
-    // Interaction B: Air Pinch Gesture (Only when NOT over button)
-    // When session is NOT active: 2-finger pinch held for 1.0s starts session
-    // When session IS active: Air-pinch is disabled to completely prevent conflict with drawing!
+    // Interaction B: Air Pinch Gesture (Only when NOT over button and NOT in active session)
     if (!isOverActionButton) {
       if (!isDrawingSessionActiveRef.current) {
-        if (data.isTwoFingerOnlyPinch && canTriggerButton) {
+        if (isPinchingNow && canTriggerButton) {
           if (!airPinchStartTimeRef.current) {
             airPinchStartTimeRef.current = now;
           } else {
             const elapsed = now - airPinchStartTimeRef.current;
-            const progress = Math.min(100, Math.round((elapsed / 1000) * 100)); // Exactly 1.0s (1000ms)
-            setDwellProgress(progress);
+            const progress = Math.min(100, Math.round((elapsed / 1000) * 100));
+            if (Math.abs(progress - dwellProgressRef.current) >= 5) {
+              dwellProgressRef.current = progress;
+              setDwellProgress(progress);
+            }
             if (elapsed >= 1000) {
+              pinchMustReleaseRef.current = true;
               airPinchStartTimeRef.current = null;
+              dwellProgressRef.current = 0;
               setDwellProgress(0);
               setButtonClickFeedback(true);
               setTimeout(() => setButtonClickFeedback(false), 500);
@@ -542,7 +599,8 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
           }
         } else {
           airPinchStartTimeRef.current = null;
-          if (!isOverActionButton) {
+          if (dwellProgressRef.current !== 0) {
+            dwellProgressRef.current = 0;
             setDwellProgress(0);
           }
         }
@@ -950,17 +1008,17 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
       {/* Main Drawing Stage Area */}
       <div
         ref={containerRef}
-        className="relative flex-1 w-full bg-slate-950 flex items-center justify-center p-2 sm:p-4 overflow-hidden select-none"
-        style={{ minHeight: '520px' }}
+        className="relative flex-1 w-full bg-slate-950 flex items-center justify-center p-1 sm:p-4 overflow-hidden select-none min-h-[340px] sm:min-h-[460px] md:min-h-[520px]"
       >
         {/* Dynamic Aspect-Ratio Frame: Video & Canvases matched 1:1 for perfect skeleton alignment */}
         <div
+          ref={stageFrameRef}
           style={{
             aspectRatio: `${videoDimensions.width} / ${videoDimensions.height}`,
             maxWidth: '100%',
-            maxHeight: 'calc(100vh - 220px)'
+            maxHeight: 'calc(100vh - 160px)'
           }}
-          className="relative w-full max-w-[800px] rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 shadow-2xl flex items-center justify-center mx-auto"
+          className="relative w-full max-w-[850px] rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 shadow-2xl flex items-center justify-center mx-auto"
         >
           {/* Layer 1: Background Video Camera */}
           <video
@@ -969,7 +1027,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             muted
             onLoadedMetadata={handleVideoLoadedMetadata}
             onResize={handleVideoLoadedMetadata}
-            className={`absolute inset-0 w-full h-full object-contain -scale-x-100 transition-opacity duration-300 pointer-events-none ${
+            className={`absolute inset-0 w-full h-full object-fill -scale-x-100 transition-opacity duration-300 pointer-events-none ${
               inputMode === 'ar_hand' && showVideoFeed ? 'opacity-90' : 'opacity-0'
             }`}
             style={{
@@ -982,7 +1040,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             ref={guideCanvasRef}
             width={videoDimensions.width}
             height={videoDimensions.height}
-            className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10 transition-all duration-200"
+            className="absolute inset-0 w-full h-full object-fill pointer-events-none z-10 transition-all duration-200"
             style={{
               filter: guideColor === 'yellow'
                 ? 'drop-shadow(0 0 6px rgba(250, 204, 21, 0.8)) drop-shadow(0 0 14px rgba(234, 179, 8, 0.45))'
@@ -1043,7 +1101,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
               isMouseDownRef.current = false;
               lastDrawPosRef.current = null;
             }}
-            className="absolute inset-0 w-full h-full object-contain cursor-crosshair z-20"
+            className="absolute inset-0 w-full h-full object-fill cursor-crosshair z-20"
           />
 
           {/* Layer 4: MediaPipe Hand Landmark Skeleton Canvas */}
@@ -1052,7 +1110,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
               ref={skeletonCanvasRef}
               width={videoDimensions.width}
               height={videoDimensions.height}
-              className="absolute inset-0 w-full h-full object-contain pointer-events-none z-30"
+              className="absolute inset-0 w-full h-full object-fill pointer-events-none z-30"
             />
           )}
 

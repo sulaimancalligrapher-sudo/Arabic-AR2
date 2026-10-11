@@ -310,14 +310,13 @@ class HandTrackingService {
         this.hands.onResults((results: any) => this.processResults(results));
       }
 
-      // 3. Direct camera capture:
-      // - Large desktop/PC screens: 1280x720 HD widescreen for large, expansive display with minimal margins
-      // - Mobile & Tablets: 640x480 for lightweight, smooth 30 FPS performance
+      // 3. Direct camera capture with orientation-aware constraints:
+      const isPortrait = typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: 'user',
-          width: this.isMobileOrTablet ? { ideal: 640 } : { ideal: 1280 },
-          height: this.isMobileOrTablet ? { ideal: 480 } : { ideal: 720 },
+          width: this.isMobileOrTablet ? (isPortrait ? { ideal: 480 } : { ideal: 640 }) : { ideal: 1280 },
+          height: this.isMobileOrTablet ? (isPortrait ? { ideal: 640 } : { ideal: 480 }) : { ideal: 720 },
           frameRate: { ideal: 30, max: 30 }
         },
         audio: false
@@ -342,8 +341,8 @@ class HandTrackingService {
 
       const updateDims = () => {
         if (!this.videoElement) return;
-        const vWidth = this.videoElement.videoWidth || 640;
-        const vHeight = this.videoElement.videoHeight || 480;
+        const vWidth = this.videoElement.videoWidth || (this.isMobileOrTablet ? 640 : 1280);
+        const vHeight = this.videoElement.videoHeight || (this.isMobileOrTablet ? 480 : 720);
         this.videoDimensions = {
           width: vWidth,
           height: vHeight,
@@ -356,7 +355,10 @@ class HandTrackingService {
 
       this.isRunning = true;
 
-      // Efficient frame loop with zero queue backlog
+      // Efficient frame loop with hardware acceleration and 30fps throttle on mobile to prevent heat & lag
+      let lastProcessedTime = 0;
+      const minIntervalMs = this.isMobileOrTablet ? 33 : 16; // Stable 30 FPS on mobile/tablet, 60 FPS on PC
+
       const processLoop = async () => {
         if (!this.isRunning || !this.videoElement || !this.hands) return;
 
@@ -376,35 +378,15 @@ class HandTrackingService {
           return;
         }
 
-        if (!this.isProcessingFrame && this.videoElement.readyState >= 2) {
+        const now = Date.now();
+        if (!this.isProcessingFrame && this.videoElement.readyState >= 2 && (now - lastProcessedTime >= minIntervalMs)) {
           this.isProcessingFrame = true;
+          lastProcessedTime = now;
           try {
             this.updateFps();
-
-            if (this.isMobileOrTablet) {
-              // Solution 2: Lightweight internal processing downscale for mobile/tablet
-              // The <video> element on screen remains 100% native full size & quality!
-              // But the MediaPipe neural net processes a fast 360px feed, multiplying FPS and preventing device heat.
-              if (!this.offscreenCanvas) {
-                this.offscreenCanvas = document.createElement('canvas');
-                this.offscreenCtx = this.offscreenCanvas.getContext('2d', { willReadFrequently: false });
-              }
-              const aspect = this.videoDimensions.aspect || 1.333;
-              const procW = 360;
-              const procH = Math.max(180, Math.round(procW / aspect));
-              if (this.offscreenCanvas.width !== procW || this.offscreenCanvas.height !== procH) {
-                this.offscreenCanvas.width = procW;
-                this.offscreenCanvas.height = procH;
-              }
-              if (this.offscreenCtx) {
-                this.offscreenCtx.drawImage(this.videoElement, 0, 0, procW, procH);
-                await this.hands.send({ image: this.offscreenCanvas });
-              } else {
-                await this.hands.send({ image: this.videoElement });
-              }
-            } else {
-              await this.hands.send({ image: this.videoElement });
-            }
+            // Direct GPU texture upload from video element into MediaPipe WebGL WASM:
+            // Avoids slow CPU drawImage and avoids memory allocations!
+            await this.hands.send({ image: this.videoElement });
           } catch {
             // Ignore transient frame send error
           } finally {
@@ -532,15 +514,17 @@ class HandTrackingService {
       // Direct Euclidean distance between thumb tip and index tip
       const directTipDistance = Math.hypot(thumbX - targetX, thumbY - targetY);
 
+      // Pinch activation: when thumb tip and index tip touch (or get close)
       const isCurrentlyClose2 =
-        rawDistance < 0.135 ||
-        directTipDistance < 0.11 ||
-        pinchRatio < 0.82;
+        directTipDistance < 0.088 ||
+        rawDistance < 0.115 ||
+        pinchRatio < 0.75;
 
+      // Pinch release: when fingers separate (any condition indicates release, preventing stuck pinches!)
       const isCurrentlyFar2 =
-        rawDistance > 0.175 &&
-        directTipDistance > 0.14 &&
-        pinchRatio > 0.98;
+        directTipDistance > 0.115 ||
+        rawDistance > 0.145 ||
+        pinchRatio > 0.88;
 
       if (this.currentPinchState) {
         if (isCurrentlyFar2) {
@@ -626,12 +610,11 @@ class HandTrackingService {
         this.isLatched = true;
       }
 
-      // Dedicated 2-finger-only pinch (Thumb + Index touching, Middle is NOT clustered):
-      // Prevents 3-finger drawing pen grip from triggering 2-finger button clicks!
+      // Dedicated 2-finger-only pinch (Thumb + Index touching, Middle is NOT clustered in a pen grip):
       const isTwoFingerOnlyPinch = this.currentPinchState && (
-        distIndexMiddle > 0.075 ||
-        distThumbMiddle > 0.085 ||
-        rawMiddle.y > Math.max(rawIndex.y, rawThumb.y) + 0.035
+        !this.currentThreeFingerState ||
+        distIndexMiddle > 0.055 ||
+        distThumbMiddle > 0.065
       );
 
       // Active Draw Point: Resilient index tip
