@@ -1,0 +1,10 @@
+{
+  "name": "استوديو الرسم التفاعلي | Interactive Drawing Studio",
+  "description": "استوديو الرسم التفاعلي المستقل لتتبع حركة اليد والواقع المعزز وشرح المعلم ومتابعة الدرجات والسبورة الذكية",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
