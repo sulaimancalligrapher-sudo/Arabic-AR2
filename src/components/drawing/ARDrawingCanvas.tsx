@@ -105,7 +105,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
   const airPinchStartTimeRef = useRef<number | null>(null);
   const threeFingerJoinStartTimeRef = useRef<number | null>(null);
   const pinchMustReleaseRef = useRef<boolean>(false);
-  const handleToggleButtonSessionRef = useRef<() => void>(() => {});
+  const handleToggleButtonSessionRef = useRef<(force?: boolean) => void>(() => {});
 
   // Drawing state
   const [brushColor, setBrushColor] = useState(drawing.mode === 'color' ? '#ef4444' : '#10b981');
@@ -310,10 +310,10 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
   }, [attempts, drawing, onComplete, student]);
 
   // Unified Toggle: Start Drawing / Finish Drawing
-  const handleToggleButtonSession = useCallback(() => {
+  const handleToggleButtonSession = useCallback((force = false) => {
     const now = Date.now();
-    if (now - lastButtonTriggerRef.current < 2000) {
-      return; // Cooldown 2s to prevent rapid start/stop cycling
+    if (!force && now - lastButtonTriggerRef.current < 1200) {
+      return; // Cooldown 1.2s to prevent rapid start/stop cycling
     }
     lastButtonTriggerRef.current = now;
     dwellStartTimeRef.current = null;
@@ -333,6 +333,9 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
       // 2. FINISH SESSION
       isDrawingSessionActiveRef.current = false;
       setIsDrawingSessionActive(false);
+      lastDrawPosRef.current = null;
+      isPenDownRef.current = false;
+      setIsPenDown(false);
       setButtonClickFeedback(true);
       setTimeout(() => setButtonClickFeedback(false), 500);
       triggerSuccess(accuracy || 75);
@@ -488,7 +491,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
         const midScreenX = (indexScreenX + thumbScreenX) / 2;
         const midScreenY = (indexScreenY + thumbScreenY) / 2;
 
-        const pad = 35; // Generous comfortable margin around button
+        const pad = 45; // Generous comfortable margin around button for natural hand movement
         const checkInside = (sx: number, sy: number) => (
           sx >= btnRect.left - pad &&
           sx <= btnRect.right + pad &&
@@ -508,11 +511,11 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
       setIsHoveringButton(isOverActionButton);
     }
 
-    // Determine current 2-finger pinch state
+    // Determine current 2-finger pinch state with scale invariance
     const directTipDist = data.thumbTip && data.indexTip
       ? Math.hypot(data.thumbTip.x - data.indexTip.x, data.thumbTip.y - data.indexTip.y)
       : 1.0;
-    const isPinchingNow = data.isPinching || directTipDist < 0.095 || data.isTwoFingerOnlyPinch;
+    const isPinchingNow = data.isPinching || directTipDist < 0.11 || data.isTwoFingerOnlyPinch || (data.pinchRatio !== undefined && data.pinchRatio < 0.65);
 
     // Reset pinch guard as soon as fingers open
     if (!isPinchingNow) {
@@ -542,18 +545,18 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
         setButtonClickFeedback(true);
         setTimeout(() => setButtonClickFeedback(false), 500);
         audioService.playPopSound();
-        handleToggleButtonSessionRef.current();
+        handleToggleButtonSessionRef.current(true);
       } else if (!dwellStartTimeRef.current) {
         dwellStartTimeRef.current = now;
       } else {
-        // Interaction A2: DWELL FALLBACK (Holding hand steadily over button for 1.0s)
+        // Interaction A2: DWELL FALLBACK (Holding hand steadily over button for 1.2s)
         const elapsed = now - dwellStartTimeRef.current;
-        const progress = Math.min(100, Math.round((elapsed / 1000) * 100));
+        const progress = Math.min(100, Math.round((elapsed / 1200) * 100));
         if (Math.abs(progress - dwellProgressRef.current) >= 5) {
           dwellProgressRef.current = progress;
           setDwellProgress(progress);
         }
-        if (elapsed >= 1000 && canTriggerButton) {
+        if (elapsed >= 1200 && canTriggerButton) {
           pinchMustReleaseRef.current = true;
           lastButtonTriggerRef.current = now;
           dwellStartTimeRef.current = null;
@@ -562,7 +565,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
           setButtonClickFeedback(true);
           setTimeout(() => setButtonClickFeedback(false), 500);
           audioService.playPopSound();
-          handleToggleButtonSessionRef.current();
+          handleToggleButtonSessionRef.current(true);
         }
       }
     } else {
@@ -1119,7 +1122,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             <button
               ref={actionButtonRef}
               type="button"
-              onClick={handleToggleButtonSession}
+              onClick={() => handleToggleButtonSession(true)}
               className={`relative overflow-hidden px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl border-2 flex items-center gap-2.5 transition-all duration-200 cursor-pointer shadow-2xl backdrop-blur-md select-none ${
                 buttonClickFeedback
                   ? 'scale-95 ring-8 ring-amber-400/80 bg-amber-400 text-slate-950'
@@ -1459,7 +1462,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
           </button>
 
           <button
-            onClick={handleToggleButtonSession}
+            onClick={() => handleToggleButtonSession(true)}
             className={`px-4 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-lg transition-all cursor-pointer ${
               !isDrawingSessionActive
                 ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20'

@@ -93,8 +93,13 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
 
   // Computed Stage Pixel Dimensions (Guarantees zero stretching on PC, mobile portrait, and tablets)
   const [stageDimensions, setStageDimensions] = useState<{ width: number; height: number }>(() => {
-    if (typeof window !== 'undefined' && window.innerWidth > 840) {
-      return { width: 1280, height: 720 };
+    if (typeof window !== 'undefined') {
+      const w = window.innerWidth;
+      if (w > 840) {
+        return { width: Math.min(w, 1280), height: 720 };
+      }
+      const fitW = Math.max(280, w - 16);
+      return { width: fitW, height: Math.round(fitW * 0.75) };
     }
     return { width: 640, height: 480 };
   });
@@ -213,8 +218,8 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
         height: Math.min(availH, Math.floor(renderH))
       });
     } else {
-      // ON MOBILE / TABLET: Keep the current suitable natural fit
-      const targetAspect = videoDims.aspect || 640 / 480;
+      // ON MOBILE / TABLET: Keep the current suitable natural fit without overflowing viewport
+      const targetAspect = videoDims.aspect || (4 / 3);
 
       let renderW = availW;
       let renderH = availW / targetAspect;
@@ -225,8 +230,8 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       }
 
       setStageDimensions({
-        width: Math.max(280, Math.floor(renderW)),
-        height: Math.max(210, Math.floor(renderH))
+        width: Math.min(availW, Math.floor(renderW)),
+        height: Math.min(availH, Math.floor(renderH))
       });
     }
   }, [isMobileDevice, videoDims.aspect]);
@@ -543,7 +548,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
 
   const handleToggleButton = useCallback((force = false) => {
     const now = Date.now();
-    if (!force && now - lastButtonTriggerRef.current < 2000) {
+    if (!force && now - lastButtonTriggerRef.current < 1200) {
       return;
     }
     lastButtonTriggerRef.current = now;
@@ -826,7 +831,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
         const midX = thumbPos ? (indexPos.screenX + thumbPos.screenX) / 2 : indexPos.screenX;
         const midY = thumbPos ? (indexPos.screenY + thumbPos.screenY) / 2 : indexPos.screenY;
 
-        const pad = 35; // Generous comfortable margin around button
+        const pad = 45; // Generous comfortable margin around button for natural hand movement
         const checkInside = (sx: number, sy: number) => (
           sx >= btnRect.left - pad &&
           sx <= btnRect.right + pad &&
@@ -846,11 +851,11 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       setIsHoveringButton(isOverButton);
     }
 
-    // Determine current 2-finger pinch state
+    // Determine current 2-finger pinch state with scale invariance
     const directTipDist = data.thumbTip && data.indexTip
       ? Math.hypot(data.thumbTip.x - data.indexTip.x, data.thumbTip.y - data.indexTip.y)
       : 1.0;
-    const isPinchingNow = data.isPinching || directTipDist < 0.095 || data.isTwoFingerOnlyPinch;
+    const isPinchingNow = data.isPinching || directTipDist < 0.11 || data.isTwoFingerOnlyPinch || (data.pinchRatio !== undefined && data.pinchRatio < 0.65);
 
     // Reset pinch release guard when student opens fingers
     if (!isPinchingNow) {
@@ -884,14 +889,14 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       } else if (!dwellStartTimeRef.current) {
         dwellStartTimeRef.current = now;
       } else {
-        // Interaction A2: DWELL FALLBACK (Holding hand steadily over button for 1.0s)
+        // Interaction A2: DWELL FALLBACK (Holding hand steadily over button for 1.2s)
         const elapsed = now - dwellStartTimeRef.current;
-        const progress = Math.min(100, Math.round((elapsed / 1000) * 100));
+        const progress = Math.min(100, Math.round((elapsed / 1200) * 100));
         if (Math.abs(progress - dwellProgressRef.current) >= 5) {
           dwellProgressRef.current = progress;
           setDwellProgress(progress);
         }
-        if (elapsed >= 1000 && canTriggerButton) {
+        if (elapsed >= 1200 && canTriggerButton) {
           pinchMustReleaseRef.current = true;
           lastButtonTriggerRef.current = now;
           dwellStartTimeRef.current = null;
@@ -1427,7 +1432,9 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
           ref={stageFrameRef}
           style={{
             width: `${stageDimensions.width}px`,
-            height: `${stageDimensions.height}px`
+            height: `${stageDimensions.height}px`,
+            maxWidth: '100%',
+            maxHeight: '100%'
           }}
           className={`relative overflow-hidden transition-all duration-300 flex items-center justify-center ${
             inputMethod === 'touch_mouse'

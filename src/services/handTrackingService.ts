@@ -22,6 +22,7 @@ export interface HandData {
   isPinching: boolean;
   isTwoFingerOnlyPinch: boolean; // Pure two-finger pinch (Thumb + Index only; middle finger NOT clustered)
   pinchDistance: number;
+  directTipDistance?: number;
   pinchRatio: number;
 
   // 3-finger pinch (Thumb + Index + Middle) - For holding a pen & drawing ✍️
@@ -509,22 +510,24 @@ class HandTrackingService {
       const dxThumbIndex = (thumbX - targetX) * aspect;
       const dyThumbIndex = thumbY - targetY;
       const rawDistance = Math.sqrt(dxThumbIndex * dxThumbIndex + dyThumbIndex * dyThumbIndex);
-      const pinchRatio = rawDistance / palmWidth;
-
-      // Direct Euclidean distance between thumb tip and index tip
+      // Direct Euclidean distance between thumb tip and index tip in screen-normalized space
       const directTipDistance = Math.hypot(thumbX - targetX, thumbY - targetY);
 
-      // Pinch activation: when thumb tip and index tip touch (or get close)
-      const isCurrentlyClose2 =
-        directTipDistance < 0.088 ||
-        rawDistance < 0.115 ||
-        pinchRatio < 0.75;
+      // Scale-invariant pinch ratio relative to palm width:
+      const pinchRatio = rawDistance / Math.max(0.01, palmWidth);
 
-      // Pinch release: when fingers separate (any condition indicates release, preventing stuck pinches!)
+      // Pinch activation: when thumb tip and index tip touch or come close
+      // Works reliably at close camera distance, medium, and far distances!
+      const isCurrentlyClose2 =
+        pinchRatio < 0.65 ||
+        directTipDistance < 0.088 ||
+        rawDistance < 0.105;
+
+      // Pinch release: when fingers clearly separate
+      // Never releases prematurely when hand is close to the camera!
       const isCurrentlyFar2 =
-        directTipDistance > 0.115 ||
-        rawDistance > 0.145 ||
-        pinchRatio > 0.88;
+        pinchRatio > 0.85 &&
+        (directTipDistance > 0.095 || rawDistance > 0.125);
 
       if (this.currentPinchState) {
         if (isCurrentlyFar2) {
@@ -646,6 +649,7 @@ class HandTrackingService {
         isPinching: this.currentPinchState,
         isTwoFingerOnlyPinch,
         pinchDistance: rawDistance,
+        directTipDistance,
         pinchRatio,
         isThreeFingerPinching: this.currentThreeFingerState,
         threeFingerSpread,
