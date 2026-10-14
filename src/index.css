@@ -37,3 +37,17 @@
   border-color: rgba(245, 158, 11, 0.4);
   transform: translateY(-2px);
 }
+
+/* Prevent screen scrolling / viewport jumping while drawing on mobile & tablet */
+html, body {
+  overscroll-behavior-y: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.drawing-canvas-surface {
+  touch-action: none !important;
+  overscroll-behavior: none !important;
+  -webkit-touch-callout: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}

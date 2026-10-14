@@ -873,6 +873,106 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
     lastDrawPosRef.current = null;
   };
 
+  // Native non-passive Touch Prevention to STOP whole page scrolling on Mobile & Tablet
+  useEffect(() => {
+    const canvas = userDrawCanvasRef.current;
+    if (!canvas) return;
+
+    const onTouchStartNative = (e: TouchEvent) => {
+      if (e.cancelable) e.preventDefault();
+      if (!isDrawingSessionActiveRef.current) return;
+      if (e.touches[0]) {
+        isMouseDownRef.current = true;
+        const rect = canvas.getBoundingClientRect();
+        const touch = e.touches[0];
+        const px = ((touch.clientX - rect.left) / rect.width) * canvas.width;
+        const py = ((touch.clientY - rect.top) / rect.height) * canvas.height;
+        processDrawPoint(px, py);
+      }
+    };
+
+    const onTouchMoveNative = (e: TouchEvent) => {
+      if (e.cancelable) e.preventDefault();
+      if (!isMouseDownRef.current || !e.touches[0]) return;
+      const rect = canvas.getBoundingClientRect();
+      const touch = e.touches[0];
+      const px = ((touch.clientX - rect.left) / rect.width) * canvas.width;
+      const py = ((touch.clientY - rect.top) / rect.height) * canvas.height;
+      processDrawPoint(px, py);
+    };
+
+    const onTouchEndNative = (e: TouchEvent) => {
+      if (e.cancelable) e.preventDefault();
+      isMouseDownRef.current = false;
+      lastDrawPosRef.current = null;
+    };
+
+    canvas.addEventListener('touchstart', onTouchStartNative, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMoveNative, { passive: false });
+    canvas.addEventListener('touchend', onTouchEndNative, { passive: false });
+    canvas.addEventListener('touchcancel', onTouchEndNative, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', onTouchStartNative);
+      canvas.removeEventListener('touchmove', onTouchMoveNative);
+      canvas.removeEventListener('touchend', onTouchEndNative);
+      canvas.removeEventListener('touchcancel', onTouchEndNative);
+    };
+  }, [processDrawPoint]);
+
+  // Hold timer for Action Button (to eliminate accidental taps on mobile & tablets)
+  const HOLD_DURATION_MS = 800; // 0.8s hold duration
+  const [touchHoldProgress, setTouchHoldProgress] = useState(0);
+  const touchHoldTimerRef = useRef<number | null>(null);
+  const touchHoldStartRef = useRef<number | null>(null);
+
+  const startTouchHold = useCallback((e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (touchHoldTimerRef.current) {
+      cancelAnimationFrame(touchHoldTimerRef.current);
+    }
+    touchHoldStartRef.current = Date.now();
+    setTouchHoldProgress(0);
+
+    const tick = () => {
+      if (!touchHoldStartRef.current) return;
+      const elapsed = Date.now() - touchHoldStartRef.current;
+      const progress = Math.min(100, (elapsed / HOLD_DURATION_MS) * 100);
+      setTouchHoldProgress(progress);
+
+      if (progress >= 100) {
+        touchHoldStartRef.current = null;
+        touchHoldTimerRef.current = null;
+        setTouchHoldProgress(0);
+        handleToggleButtonSessionRef.current(true);
+        try {
+          if ('vibrate' in navigator) navigator.vibrate([40, 30, 40]);
+        } catch {}
+        return;
+      }
+      touchHoldTimerRef.current = requestAnimationFrame(tick);
+    };
+
+    touchHoldTimerRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  const cancelTouchHold = useCallback((e?: React.SyntheticEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    if (touchHoldTimerRef.current) {
+      cancelAnimationFrame(touchHoldTimerRef.current);
+      touchHoldTimerRef.current = null;
+    }
+    touchHoldStartRef.current = null;
+    setTouchHoldProgress(0);
+  }, []);
+
+  const actionButtonProgress = Math.max(touchHoldProgress, dwellProgress);
+
   return (
     <div className="relative w-full max-w-5xl mx-auto rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden flex flex-col min-h-[620px]">
       
@@ -910,51 +1010,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             </div>
           </div>
 
-          {/* Mode Switch & Gesture Selector */}
-          <div className="flex items-center gap-2">
-            {/* Hand Gesture Mode Selector (When in ar_hand) */}
-            {inputMode === 'ar_hand' && (
-              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-700/80 gap-1 shadow-inner">
-                <button
-                  onClick={() => setGestureMode('three_finger')}
-                  className={`px-2.5 py-1 text-xs rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
-                    gestureMode === 'three_finger'
-                      ? 'bg-amber-500 text-slate-950 font-extrabold shadow-md'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                  title="ضم 3 أصابع (الإبهام + السبابة + الوسطى) كمسكة القلم للرسم، وافتحها لرفع القلم والتنقل بحرية"
-                >
-                  <PenTool className="w-3.5 h-3.5" />
-                  <span>3 أصابع (قلم) ✍️</span>
-                </button>
-
-                <button
-                  onClick={() => setGestureMode('two_finger')}
-                  className={`px-2 py-1 text-xs rounded-lg flex items-center gap-1 transition-all cursor-pointer ${
-                    gestureMode === 'two_finger'
-                      ? 'bg-amber-500 text-slate-950 font-extrabold shadow-md'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                  title="ضم إصبعين (السبابة والإبهام) للرسم"
-                >
-                  <span>إصبعان 🤏</span>
-                </button>
-
-                <button
-                  onClick={() => setGestureMode('index_continuous')}
-                  className={`px-2 py-1 text-xs rounded-lg flex items-center gap-1 transition-all cursor-pointer ${
-                    gestureMode === 'index_continuous'
-                      ? 'bg-amber-500 text-slate-950 font-extrabold shadow-md'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                  title="رسم مستمر بحركة السبابة"
-                >
-                  <span>سبابة ☝️</span>
-                </button>
-              </div>
-            )}
-
-            {/* Input Device Switch: 1. Hand Tracking, 2. Mouse / Finger Touch */}
+          {/* Input Device Switch: 1. Hand Tracking, 2. Mouse / Finger Touch */}
             <div className="flex items-center bg-slate-950 p-1 rounded-2xl border border-slate-700/90 shadow-inner">
               <button
                 onClick={() => setInputMode('ar_hand')}
@@ -981,7 +1037,6 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
                 <span>فأرة / لمس</span>
               </button>
             </div>
-          </div>
 
           {/* Hand Lab Button */}
           {inputMode === 'ar_hand' && (
@@ -1071,7 +1126,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             </div>
           )}
 
-          {/* Layer 3: User Real-Time Hand/Mouse Drawing Canvas */}
+          {/* Layer 3: User Real-Time Hand/Mouse/Touch Drawing Canvas */}
           <canvas
             ref={userDrawCanvasRef}
             width={videoDimensions.width}
@@ -1080,31 +1135,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
-            onTouchStart={(e) => {
-              if (!isDrawingSessionActiveRef.current) return;
-              if (e.touches[0] && userDrawCanvasRef.current) {
-                isMouseDownRef.current = true;
-                const rect = userDrawCanvasRef.current.getBoundingClientRect();
-                const touch = e.touches[0];
-                const px = ((touch.clientX - rect.left) / rect.width) * userDrawCanvasRef.current.width;
-                const py = ((touch.clientY - rect.top) / rect.height) * userDrawCanvasRef.current.height;
-                processDrawPoint(px, py);
-              }
-            }}
-            onTouchMove={(e) => {
-              if (isMouseDownRef.current && e.touches[0] && userDrawCanvasRef.current) {
-                const rect = userDrawCanvasRef.current.getBoundingClientRect();
-                const touch = e.touches[0];
-                const px = ((touch.clientX - rect.left) / rect.width) * userDrawCanvasRef.current.width;
-                const py = ((touch.clientY - rect.top) / rect.height) * userDrawCanvasRef.current.height;
-                processDrawPoint(px, py);
-              }
-            }}
-            onTouchEnd={() => {
-              isMouseDownRef.current = false;
-              lastDrawPosRef.current = null;
-            }}
-            className="absolute inset-0 w-full h-full object-fill cursor-crosshair z-20"
+            className="absolute inset-0 w-full h-full object-fill cursor-crosshair z-20 touch-none select-none overscroll-none drawing-canvas-surface"
           />
 
           {/* Layer 4: MediaPipe Hand Landmark Skeleton Canvas */}
@@ -1117,79 +1148,84 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             />
           )}
 
-          {/* Interactive In-Canvas Hand Button (Placed INSIDE the video feed at Top-Right) */}
-          <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-40 pointer-events-auto">
+          {/* Interactive In-Canvas Action Button (Compact Icon Only with Hold Duration & SVG Progress Ring) */}
+          <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-40 pointer-events-auto flex flex-col items-center gap-1.5">
             <button
               ref={actionButtonRef}
               type="button"
-              onClick={() => handleToggleButtonSession(true)}
-              className={`relative overflow-hidden px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl border-2 flex items-center gap-2.5 transition-all duration-200 cursor-pointer shadow-2xl backdrop-blur-md select-none ${
+              onPointerDown={startTouchHold}
+              onPointerUp={cancelTouchHold}
+              onPointerLeave={cancelTouchHold}
+              onPointerCancel={cancelTouchHold}
+              className={`relative w-13 h-13 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer shadow-2xl backdrop-blur-md select-none touch-none ${
                 buttonClickFeedback
-                  ? 'scale-95 ring-8 ring-amber-400/80 bg-amber-400 text-slate-950'
+                  ? 'scale-90 ring-8 ring-amber-400 bg-amber-400 text-slate-950'
+                  : touchHoldProgress > 0
+                  ? 'scale-95 ring-4 ring-amber-400/80 shadow-amber-500/50'
                   : !isDrawingSessionActive
                   ? isHoveringButton
-                    ? 'bg-emerald-900/95 border-emerald-400 text-emerald-100 scale-105 ring-4 ring-emerald-400/60 shadow-emerald-500/40 animate-pulse'
-                    : 'bg-emerald-950/90 border-emerald-500/80 text-emerald-200 hover:bg-emerald-900/90'
+                    ? 'bg-emerald-600 border-2 border-emerald-300 text-slate-950 scale-105 ring-4 ring-emerald-400/60 shadow-emerald-500/60 animate-pulse'
+                    : 'bg-emerald-500 hover:bg-emerald-400 border-2 border-emerald-400 text-slate-950 shadow-emerald-600/40'
                   : isHoveringButton
-                  ? 'bg-rose-900/95 border-rose-400 text-rose-100 scale-105 ring-4 ring-rose-400/60 shadow-rose-500/40 animate-pulse'
-                  : 'bg-rose-950/90 border-rose-500/80 text-rose-200 hover:bg-rose-900/90'
+                  ? 'bg-rose-600 border-2 border-rose-300 text-white scale-105 ring-4 ring-rose-400/60 shadow-rose-500/60 animate-pulse'
+                  : 'bg-rose-500 hover:bg-rose-400 border-2 border-rose-400 text-white shadow-rose-600/40'
               }`}
               title={
                 !isDrawingSessionActive
-                  ? 'اضغط بالماوس أو اقبض بإصبعين 🤏 لبدء جلسة الرسم'
-                  : 'اضغط بالماوس أو اقبض بإصبعين 🤏 لإنهاء الرسم وحساب النتيجة'
+                  ? 'المس مطولاً (0.8ث) أو اقبض بإصبعين 🤏 في الهواء لبدء الرسم'
+                  : 'المس مطولاً (0.8ث) أو اقبض بإصبعين 🤏 في الهواء لإنهاء وحفظ النتيجة'
               }
             >
-              {/* Dwell Progress bar */}
-              {dwellProgress > 0 && (
-                <div
-                  className="absolute inset-x-0 bottom-0 h-1.5 bg-amber-400 transition-all duration-75"
-                  style={{ width: `${dwellProgress}%` }}
-                />
-              )}
-              {/* Status Icon */}
-              <div
-                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shrink-0 shadow-inner ${
-                  !isDrawingSessionActive
-                    ? 'bg-emerald-500 text-slate-950 shadow-emerald-600/50'
-                    : 'bg-rose-500 text-white shadow-rose-600/50'
-                }`}
+              {/* Circular Progress Ring (Fills smoothly during touch hold or hand pinch/dwell) */}
+              <svg
+                className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none p-0.5"
+                viewBox="0 0 64 64"
               >
-                {!isDrawingSessionActive ? (
-                  <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current ml-0.5" />
-                ) : (
-                  <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                {/* Background circle track */}
+                <circle
+                  cx="32"
+                  cy="32"
+                  r="27"
+                  fill="none"
+                  stroke="rgba(0,0,0,0.25)"
+                  strokeWidth="4"
+                />
+                {/* Active progress track */}
+                {actionButtonProgress > 0 && (
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="27"
+                    fill="none"
+                    stroke="#fbbf24"
+                    strokeWidth="4.5"
+                    strokeDasharray="169.6"
+                    strokeDashoffset={169.6 * (1 - actionButtonProgress / 100)}
+                    strokeLinecap="round"
+                    className="transition-all duration-75"
+                  />
                 )}
-              </div>
+              </svg>
 
-              {/* Text & Gesture Hint */}
-              <div className="text-right">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs sm:text-sm font-extrabold text-white">
-                    {!isDrawingSessionActive ? 'ابدأ الرسم' : 'إنهاء وحفظ النتيجة'}
-                  </span>
-                  <span
-                    className={`text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full font-bold ${
-                      !isDrawingSessionActive
-                        ? 'bg-emerald-400/20 text-emerald-300 border border-emerald-500/30'
-                        : 'bg-rose-400/20 text-rose-300 border border-rose-500/30'
-                    }`}
-                  >
-                    {!isDrawingSessionActive ? 'استعداد' : 'جارٍ الرسم ✍️'}
-                  </span>
-                </div>
-
-                <div className="text-[10px] sm:text-[11px] text-slate-300 font-medium flex items-center gap-1 mt-0.5">
-                  <span>انقر بإصبعين</span>
-                  <span className="text-amber-400 font-bold">🤏 (سبابة + إبهام)</span>
-                  {isHoveringButton && (
-                    <span className="text-emerald-400 font-bold mr-1 animate-bounce">
-                      ← اقبض الآن!
-                    </span>
-                  )}
-                </div>
-              </div>
+              {/* Clear Prominent Icon Only (Zero text inside button!) */}
+              {!isDrawingSessionActive ? (
+                <Play className="w-6 h-6 sm:w-7 sm:h-7 fill-current ml-0.5 drop-shadow-md text-slate-950 transition-transform active:scale-95" />
+              ) : (
+                <CheckCircle2 className="w-6 h-6 sm:w-7 sm:h-7 drop-shadow-md text-white transition-transform active:scale-95" />
+              )}
             </button>
+
+            {/* Micro-hint on Hold or Hover: Shows holding feedback without bloating the button */}
+            {touchHoldProgress > 0 && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-950/90 text-amber-300 border border-amber-500/40 shadow pointer-events-none animate-in fade-in">
+                جارٍ التفعيل {Math.round(touchHoldProgress)}%
+              </span>
+            )}
+            {inputMode === 'ar_hand' && isHoveringButton && touchHoldProgress === 0 && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-950/90 text-emerald-300 border border-emerald-500/40 shadow pointer-events-none animate-bounce">
+                اقبض بإصبعين 🤏 للنقر
+              </span>
+            )}
           </div>
         </div>
 

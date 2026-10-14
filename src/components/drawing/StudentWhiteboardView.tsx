@@ -563,6 +563,59 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     }
   }, [finishDrawingSession, startDrawingSession]);
 
+  // Hold timer for Action Button (to eliminate accidental touches on mobile & tablet)
+  const HOLD_DURATION_MS = 800; // 0.8s hold duration
+  const [touchHoldProgress, setTouchHoldProgress] = useState(0);
+  const touchHoldTimerRef = useRef<number | null>(null);
+  const touchHoldStartRef = useRef<number | null>(null);
+
+  const startTouchHold = useCallback((e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (touchHoldTimerRef.current) {
+      cancelAnimationFrame(touchHoldTimerRef.current);
+    }
+    touchHoldStartRef.current = Date.now();
+    setTouchHoldProgress(0);
+
+    const tick = () => {
+      if (!touchHoldStartRef.current) return;
+      const elapsed = Date.now() - touchHoldStartRef.current;
+      const progress = Math.min(100, (elapsed / HOLD_DURATION_MS) * 100);
+      setTouchHoldProgress(progress);
+
+      if (progress >= 100) {
+        touchHoldStartRef.current = null;
+        touchHoldTimerRef.current = null;
+        setTouchHoldProgress(0);
+        handleToggleButton(true);
+        try {
+          if ('vibrate' in navigator) navigator.vibrate([40, 30, 40]);
+        } catch {}
+        return;
+      }
+      touchHoldTimerRef.current = requestAnimationFrame(tick);
+    };
+
+    touchHoldTimerRef.current = requestAnimationFrame(tick);
+  }, [handleToggleButton]);
+
+  const cancelTouchHold = useCallback((e?: React.SyntheticEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    if (touchHoldTimerRef.current) {
+      cancelAnimationFrame(touchHoldTimerRef.current);
+      touchHoldTimerRef.current = null;
+    }
+    touchHoldStartRef.current = null;
+    setTouchHoldProgress(0);
+  }, []);
+
+  const actionButtonProgress = Math.max(touchHoldProgress, dwellProgress);
+
   // Flush pending throttled accuracy / score updates immediately (e.g. on stroke end or finish)
   const flushAccuracyUpdate = useCallback(() => {
     setCoverage(latestCoverageRef.current);
@@ -749,6 +802,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
 
   // Pointer events for Pure Whiteboard direct drawing mode (Stylus, Touch, Mouse)
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.cancelable) e.preventDefault();
     if (inputMethodRef.current !== 'touch_mouse') return;
     if (!isSessionActiveRef.current || isFinishedRef.current || !userDrawCanvasRef.current) return;
     
@@ -765,6 +819,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.cancelable) e.preventDefault();
     if (inputMethodRef.current !== 'touch_mouse') return;
     if (!isPointerDownRef.current || !isSessionActiveRef.current || isFinishedRef.current || !userDrawCanvasRef.current) return;
 
@@ -775,6 +830,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.cancelable) e.preventDefault();
     if (inputMethodRef.current !== 'touch_mouse') return;
     isPointerDownRef.current = false;
     setIsPenDown(false);
@@ -786,6 +842,95 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     } catch {}
     flushAccuracyUpdate();
   };
+
+  // Native non-passive Touch Prevention to STOP whole page scrolling on Mobile & Tablet
+  useEffect(() => {
+    const canvas = userDrawCanvasRef.current;
+    const stage = stageFrameRef.current;
+    const container = stageContainerRef.current;
+
+    const onTouchStartNative = (e: TouchEvent) => {
+      if (e.cancelable) e.preventDefault();
+      if (inputMethodRef.current !== 'touch_mouse') return;
+      if (!isSessionActiveRef.current || isFinishedRef.current || !canvas) return;
+      if (e.touches[0]) {
+        isPointerDownRef.current = true;
+        setIsPenDown(true);
+        const touch = e.touches[0];
+        const coords = getCanvasCoordinates(touch.clientX, touch.clientY);
+        if (coords) {
+          processDrawPoint(coords.px, coords.py);
+        }
+      }
+    };
+
+    const onTouchMoveNative = (e: TouchEvent) => {
+      if (e.cancelable) e.preventDefault();
+      if (inputMethodRef.current !== 'touch_mouse') return;
+      if (!isPointerDownRef.current || !isSessionActiveRef.current || isFinishedRef.current || !canvas) return;
+      if (e.touches[0]) {
+        const touch = e.touches[0];
+        const coords = getCanvasCoordinates(touch.clientX, touch.clientY);
+        if (coords) {
+          processDrawPoint(coords.px, coords.py);
+        }
+      }
+    };
+
+    const onTouchEndNative = (e: TouchEvent) => {
+      if (e.cancelable) e.preventDefault();
+      if (inputMethodRef.current !== 'touch_mouse') return;
+      isPointerDownRef.current = false;
+      setIsPenDown(false);
+      lastDrawPosRef.current = null;
+      flushAccuracyUpdate();
+    };
+
+    const onPreventTouchScroll = (e: TouchEvent) => {
+      if (e.cancelable) e.preventDefault();
+    };
+
+    if (canvas) {
+      canvas.addEventListener('touchstart', onTouchStartNative, { passive: false });
+      canvas.addEventListener('touchmove', onTouchMoveNative, { passive: false });
+      canvas.addEventListener('touchend', onTouchEndNative, { passive: false });
+      canvas.addEventListener('touchcancel', onTouchEndNative, { passive: false });
+    }
+
+    if (stage) {
+      stage.addEventListener('touchstart', onPreventTouchScroll, { passive: false });
+      stage.addEventListener('touchmove', onPreventTouchScroll, { passive: false });
+    }
+
+    if (container) {
+      container.addEventListener('touchmove', onPreventTouchScroll, { passive: false });
+    }
+
+    // Window level listener during drawing: if drawing pointer is down, stop any window scroll gesture
+    const onWindowTouchMove = (e: TouchEvent) => {
+      if (isPointerDownRef.current && e.cancelable) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('touchmove', onWindowTouchMove, { passive: false });
+
+    return () => {
+      if (canvas) {
+        canvas.removeEventListener('touchstart', onTouchStartNative);
+        canvas.removeEventListener('touchmove', onTouchMoveNative);
+        canvas.removeEventListener('touchend', onTouchEndNative);
+        canvas.removeEventListener('touchcancel', onTouchEndNative);
+      }
+      if (stage) {
+        stage.removeEventListener('touchstart', onPreventTouchScroll);
+        stage.removeEventListener('touchmove', onPreventTouchScroll);
+      }
+      if (container) {
+        container.removeEventListener('touchmove', onPreventTouchScroll);
+      }
+      window.removeEventListener('touchmove', onWindowTouchMove);
+    };
+  }, [flowState, getCanvasCoordinates, processDrawPoint, flushAccuracyUpdate]);
 
   // Hand tracking update callback with Smart Latch logic
   const handleHandUpdate = useCallback((data: HandData) => {
@@ -855,7 +1000,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     const directTipDist = data.thumbTip && data.indexTip
       ? Math.hypot(data.thumbTip.x - data.indexTip.x, data.thumbTip.y - data.indexTip.y)
       : 1.0;
-    const isPinchingNow = data.isPinching || directTipDist < 0.11 || data.isTwoFingerOnlyPinch || (data.pinchRatio !== undefined && data.pinchRatio < 0.65);
+    const isPinchingNow = data.isPinching || directTipDist < 0.15 || data.isTwoFingerOnlyPinch || (data.pinchRatio !== undefined && data.pinchRatio < 0.72);
 
     // Reset pinch release guard when student opens fingers
     if (!isPinchingNow) {
@@ -885,18 +1030,21 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
         setButtonFeedback(true);
         setTimeout(() => setButtonFeedback(false), 500);
         audioService.playPopSound();
+        try {
+          if ('vibrate' in navigator) navigator.vibrate([40, 30, 40]);
+        } catch {}
         handleToggleButton(true);
       } else if (!dwellStartTimeRef.current) {
         dwellStartTimeRef.current = now;
       } else {
-        // Interaction A2: DWELL FALLBACK (Holding hand steadily over button for 1.2s)
+        // Interaction A2: DWELL FALLBACK (Holding hand steadily over button for 0.8s)
         const elapsed = now - dwellStartTimeRef.current;
-        const progress = Math.min(100, Math.round((elapsed / 1200) * 100));
-        if (Math.abs(progress - dwellProgressRef.current) >= 5) {
+        const progress = Math.min(100, Math.round((elapsed / 800) * 100));
+        if (Math.abs(progress - dwellProgressRef.current) >= 4) {
           dwellProgressRef.current = progress;
           setDwellProgress(progress);
         }
-        if (elapsed >= 1200 && canTriggerButton) {
+        if (elapsed >= 800 && canTriggerButton) {
           pinchMustReleaseRef.current = true;
           lastButtonTriggerRef.current = now;
           dwellStartTimeRef.current = null;
@@ -905,6 +1053,9 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
           setButtonFeedback(true);
           setTimeout(() => setButtonFeedback(false), 500);
           audioService.playPopSound();
+          try {
+            if ('vibrate' in navigator) navigator.vibrate([40, 30, 40]);
+          } catch {}
           handleToggleButton(true);
         }
       }
@@ -1509,62 +1660,93 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             }`}
           />
 
-          {/* Interactive In-Canvas Button (Start / Finish Session - Single word with icon) */}
+          {/* Interactive In-Canvas Button (Start / Finish Session - Compact Icon-Only with Circular Hold Progress) */}
           {flowState === 'drawing' && (
             <div className="absolute top-3 sm:top-4 right-3 sm:right-4 z-50 flex flex-col items-end gap-1.5 pointer-events-auto">
               <button
                 ref={actionButtonRef}
                 type="button"
+                onPointerDown={startTouchHold}
+                onPointerUp={cancelTouchHold}
+                onPointerLeave={cancelTouchHold}
+                onPointerCancel={cancelTouchHold}
+                onTouchStart={startTouchHold}
+                onTouchEnd={cancelTouchHold}
+                onTouchCancel={cancelTouchHold}
+                onMouseDown={startTouchHold}
+                onMouseUp={cancelTouchHold}
+                onMouseLeave={cancelTouchHold}
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  handleToggleButton();
+                  // Instant tap prevented without hold on touch; if held, hold timer triggers handleToggleButton(true)
                 }}
-                className={`relative overflow-hidden px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl border-2 flex items-center gap-2 transition-all duration-200 cursor-pointer shadow-2xl backdrop-blur-md select-none ${
+                className={`relative overflow-hidden w-13 h-13 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer shadow-2xl backdrop-blur-md select-none p-0 border-2 ${
                   buttonFeedback
                     ? 'scale-95 ring-8 ring-amber-400 bg-amber-400 text-slate-950'
                     : !isSessionActive
                     ? isHoveringButton
-                      ? 'bg-emerald-900/95 border-emerald-400 text-emerald-100 scale-105 ring-4 ring-emerald-400/60 shadow-emerald-500/40 animate-pulse'
-                      : 'bg-emerald-950/90 border-emerald-500/80 text-emerald-200 hover:bg-emerald-900/90'
+                      ? 'bg-emerald-600 border-2 border-emerald-300 text-white scale-105 ring-4 ring-emerald-400/60 shadow-emerald-500/60 animate-pulse'
+                      : 'bg-emerald-500 hover:bg-emerald-400 border-2 border-emerald-400 text-slate-950 shadow-emerald-600/40'
                     : isHoveringButton
-                    ? 'bg-rose-900/95 border-rose-400 text-rose-100 scale-105 ring-4 ring-rose-400/60 shadow-rose-500/40 animate-pulse'
-                    : 'bg-rose-950/90 border-rose-500/80 text-rose-200 hover:bg-rose-900/90'
+                    ? 'bg-rose-600 border-2 border-rose-300 text-white scale-105 ring-4 ring-rose-400/60 shadow-rose-500/60 animate-pulse'
+                    : 'bg-rose-500 hover:bg-rose-400 border-2 border-rose-400 text-white shadow-rose-600/40'
                 }`}
+                title={
+                  !isSessionActive
+                    ? 'المس مطولاً (0.8ث) أو اقبض بإصبعين 🤏 في الهواء لبدء الرسم'
+                    : 'المس مطولاً (0.8ث) أو اقبض بإصبعين 🤏 في الهواء لإنهاء وحفظ النتيجة'
+                }
               >
-                {/* Dwell Progress bar */}
-                {dwellProgress > 0 && (
-                  <div
-                    className="absolute inset-x-0 bottom-0 h-1.5 bg-amber-400 transition-all duration-75"
-                    style={{ width: `${dwellProgress}%` }}
+                {/* Circular Progress Ring (Fills smoothly during touch hold or hand dwell/pinch) */}
+                <svg
+                  className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none p-0.5"
+                  viewBox="0 0 64 64"
+                >
+                  {/* Background circle track */}
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="27"
+                    fill="none"
+                    stroke="rgba(0,0,0,0.25)"
+                    strokeWidth="4"
                   />
-                )}
+                  {/* Active progress track */}
+                  {actionButtonProgress > 0 && (
+                    <circle
+                      cx="32"
+                      cy="32"
+                      r="27"
+                      fill="none"
+                      stroke="#fbbf24"
+                      strokeWidth="4.5"
+                      strokeDasharray="169.6"
+                      strokeDashoffset={169.6 * (1 - actionButtonProgress / 100)}
+                      strokeLinecap="round"
+                      className="transition-all duration-75"
+                    />
+                  )}
+                </svg>
+
+                {/* Clear Prominent Icon Only (Zero text inside button!) */}
                 {!isSessionActive ? (
-                  <>
-                    <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-bold shadow shrink-0">
-                      <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current ml-0.5" />
-                    </div>
-                    <span className="text-xs sm:text-sm font-black text-emerald-100 leading-none">
-                      ابدأ
-                    </span>
-                  </>
+                  <Play className="w-6 h-6 sm:w-7 sm:h-7 fill-current ml-0.5 drop-shadow-md text-slate-950 transition-transform active:scale-95" />
                 ) : (
-                  <>
-                    <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-xl bg-rose-500 text-white flex items-center justify-center font-bold shadow shrink-0">
-                      <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    </div>
-                    <span className="text-xs sm:text-sm font-black text-rose-100 leading-none">
-                      إنهاء
-                    </span>
-                  </>
+                  <CheckCircle2 className="w-6 h-6 sm:w-7 sm:h-7 drop-shadow-md text-white transition-transform active:scale-95" />
                 )}
               </button>
 
-              {/* Hand Mode Hint badge */}
-              {inputMethod === 'hand' && (
-                <div className="px-2.5 py-1 rounded-xl bg-slate-900/95 border border-slate-700/80 text-[11px] text-amber-300 font-bold backdrop-blur-md shadow-lg flex items-center gap-1.5 select-none animate-in fade-in duration-150">
-                  <span>ضم إصبعين 🤏 في الهواء أو أشر للزر</span>
-                </div>
+              {/* Micro-hint on Hold or Hover: Feedback without taking screen space */}
+              {touchHoldProgress > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-950/90 text-amber-300 border border-amber-500/40 shadow pointer-events-none animate-in fade-in">
+                  جارٍ التفعيل {Math.round(touchHoldProgress)}%
+                </span>
+              )}
+              {inputMethod === 'hand' && isHoveringButton && touchHoldProgress === 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-950/90 text-emerald-300 border border-emerald-500/40 shadow pointer-events-none animate-bounce">
+                  اقبض بإصبعين 🤏 للنقر
+                </span>
               )}
             </div>
           )}
