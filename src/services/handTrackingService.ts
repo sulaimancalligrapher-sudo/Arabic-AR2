@@ -311,13 +311,12 @@ class HandTrackingService {
         this.hands.onResults((results: any) => this.processResults(results));
       }
 
-      // 3. Direct camera capture with orientation-aware constraints:
-      const isPortrait = typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
+      // 3. Direct camera capture with adaptive orientation constraints (supports seamless horizontal/vertical rotation):
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: 'user',
-          width: this.isMobileOrTablet ? (isPortrait ? { ideal: 480 } : { ideal: 640 }) : { ideal: 1280 },
-          height: this.isMobileOrTablet ? (isPortrait ? { ideal: 640 } : { ideal: 480 }) : { ideal: 720 },
+          width: { ideal: 1280, min: 480 },
+          height: { ideal: 720, min: 360 },
           frameRate: { ideal: 30, max: 30 }
         },
         audio: false
@@ -349,10 +348,13 @@ class HandTrackingService {
           height: vHeight,
           aspect: vWidth / vHeight
         };
+        this.latestData.videoDimensions = this.videoDimensions;
       };
 
       updateDims();
       this.videoElement.addEventListener('resize', updateDims);
+      window.addEventListener('orientationchange', updateDims);
+      window.addEventListener('resize', updateDims);
 
       this.isRunning = true;
 

@@ -310,10 +310,11 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
   }, [attempts, drawing, onComplete, student]);
 
   // Unified Toggle: Start Drawing / Finish Drawing
-  const handleToggleButtonSession = useCallback((force = false) => {
+  const handleToggleButtonSession = useCallback((_force = false) => {
     const now = Date.now();
-    if (!force && now - lastButtonTriggerRef.current < 1200) {
-      return; // Cooldown 1.2s to prevent rapid start/stop cycling
+    // Strict cooldown of 1400ms between start and finish to completely prevent rapid double-toggling
+    if (now - lastButtonTriggerRef.current < 1400) {
+      return; // Cooldown 1.4s to prevent rapid start/stop cycling
     }
     lastButtonTriggerRef.current = now;
     dwellStartTimeRef.current = null;
@@ -523,7 +524,8 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
     }
 
     const now = Date.now();
-    const canTriggerButton = (now - lastButtonTriggerRef.current > 750) && !pinchMustReleaseRef.current;
+    const canTriggerButton = (now - lastButtonTriggerRef.current > 1400) && !pinchMustReleaseRef.current;
+    const isMobile = typeof navigator !== 'undefined' && (/Android|iPhone|iPad/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1);
 
     // When hovering over the button, ensure pen does not draw lines across the button!
     if (isOverActionButton) {
@@ -533,8 +535,9 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
       }
       lastDrawPosRef.current = null;
 
-      // Interaction A1: IMMEDIATE 2-FINGER PINCH 🤏 (سبابة وإبهام) over button!
-      if (isPinchingNow && canTriggerButton) {
+      // On PC: immediate 2-finger pinch 🤏 over button.
+      // On Mobile / Tablet: Require a deliberate hold / dwell (0.8s) so passing the hand over the front camera doesn't misfire!
+      if (!isMobile && isPinchingNow && canTriggerButton) {
         pinchMustReleaseRef.current = true;
         lastButtonTriggerRef.current = now;
         dwellStartTimeRef.current = null;
@@ -549,14 +552,14 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
       } else if (!dwellStartTimeRef.current) {
         dwellStartTimeRef.current = now;
       } else {
-        // Interaction A2: DWELL FALLBACK (Holding hand steadily over button for 1.2s)
+        // Dwell hold (0.8s hold with circular progress ring)
         const elapsed = now - dwellStartTimeRef.current;
-        const progress = Math.min(100, Math.round((elapsed / 1200) * 100));
-        if (Math.abs(progress - dwellProgressRef.current) >= 5) {
+        const progress = Math.min(100, Math.round((elapsed / 800) * 100));
+        if (Math.abs(progress - dwellProgressRef.current) >= 4) {
           dwellProgressRef.current = progress;
           setDwellProgress(progress);
         }
-        if (elapsed >= 1200 && canTriggerButton) {
+        if (elapsed >= 800 && canTriggerButton) {
           pinchMustReleaseRef.current = true;
           lastButtonTriggerRef.current = now;
           dwellStartTimeRef.current = null;
@@ -925,20 +928,29 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
   const [touchHoldProgress, setTouchHoldProgress] = useState(0);
   const touchHoldTimerRef = useRef<number | null>(null);
   const touchHoldStartRef = useRef<number | null>(null);
+  const touchHoldActiveRef = useRef<boolean>(false);
+  const touchTriggeredInCurrentTouchRef = useRef<boolean>(false);
 
   const startTouchHold = useCallback((e?: React.SyntheticEvent) => {
     if (e) {
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       e.stopPropagation();
     }
+    const now = Date.now();
+    // Guard against duplicate synthetic events, rapid re-triggers, or ongoing holds
+    if (touchHoldActiveRef.current || touchTriggeredInCurrentTouchRef.current) return;
+    if (now - lastButtonTriggerRef.current < 1400) return;
+
+    touchHoldActiveRef.current = true;
+    touchHoldStartRef.current = now;
+    setTouchHoldProgress(0);
+
     if (touchHoldTimerRef.current) {
       cancelAnimationFrame(touchHoldTimerRef.current);
     }
-    touchHoldStartRef.current = Date.now();
-    setTouchHoldProgress(0);
 
     const tick = () => {
-      if (!touchHoldStartRef.current) return;
+      if (!touchHoldStartRef.current || !touchHoldActiveRef.current) return;
       const elapsed = Date.now() - touchHoldStartRef.current;
       const progress = Math.min(100, (elapsed / HOLD_DURATION_MS) * 100);
       setTouchHoldProgress(progress);
@@ -946,6 +958,8 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
       if (progress >= 100) {
         touchHoldStartRef.current = null;
         touchHoldTimerRef.current = null;
+        touchHoldActiveRef.current = false;
+        touchTriggeredInCurrentTouchRef.current = true; // Lock until finger lifted!
         setTouchHoldProgress(0);
         handleToggleButtonSessionRef.current(true);
         try {
@@ -968,6 +982,8 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
       touchHoldTimerRef.current = null;
     }
     touchHoldStartRef.current = null;
+    touchHoldActiveRef.current = false;
+    touchTriggeredInCurrentTouchRef.current = false; // Reset lock when finger is physically lifted
     setTouchHoldProgress(0);
   }, []);
 
@@ -1085,7 +1101,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             muted
             onLoadedMetadata={handleVideoLoadedMetadata}
             onResize={handleVideoLoadedMetadata}
-            className={`absolute inset-0 w-full h-full object-fill -scale-x-100 transition-opacity duration-300 pointer-events-none ${
+            className={`absolute inset-0 w-full h-full object-contain -scale-x-100 transition-opacity duration-300 pointer-events-none ${
               inputMode === 'ar_hand' && showVideoFeed ? 'opacity-90' : 'opacity-0'
             }`}
             style={{

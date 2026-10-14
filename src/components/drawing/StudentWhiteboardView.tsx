@@ -85,21 +85,25 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
 
   // Natural Native Video Dimensions (Measured dynamically from camera stream)
   const [videoDims, setVideoDims] = useState<{ width: number; height: number; aspect: number }>(() => {
-    if (typeof window !== 'undefined' && window.innerWidth > 840) {
-      return { width: 1280, height: 720, aspect: 1280 / 720 };
+    if (typeof window !== 'undefined') {
+      const isLandscape = window.innerWidth >= window.innerHeight;
+      if (isLandscape) {
+        return { width: 1280, height: 720, aspect: 1280 / 720 };
+      }
+      return { width: 720, height: 960, aspect: 720 / 960 };
     }
-    return { width: 640, height: 480, aspect: 640 / 480 };
+    return { width: 1280, height: 720, aspect: 16 / 9 };
   });
 
   // Computed Stage Pixel Dimensions (Guarantees zero stretching on PC, mobile portrait, and tablets)
   const [stageDimensions, setStageDimensions] = useState<{ width: number; height: number }>(() => {
     if (typeof window !== 'undefined') {
       const w = window.innerWidth;
-      if (w > 840) {
-        return { width: Math.min(w, 1280), height: 720 };
+      const h = window.innerHeight;
+      if (w >= h) {
+        return { width: Math.min(w, 1280), height: Math.min(h - 80, 720) };
       }
-      const fitW = Math.max(280, w - 16);
-      return { width: fitW, height: Math.round(fitW * 0.75) };
+      return { width: w, height: Math.max(320, h - 120) };
     }
     return { width: 640, height: 480 };
   });
@@ -192,8 +196,8 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
   }, []);
 
   // Update computed stage frame dimensions:
-  // - On PC: Maximize camera size to fill the browser window with minimal margins
-  // - On Mobile/Tablet: Keep natural suitable fit
+  // - In Whiteboard Touch mode: Fills the entire mobile screen vertically & horizontally with zero black bars
+  // - In Hand Tracking AR mode: Matches live camera aspect ratio 1:1 with pure mathematical box fit (no stretching)
   const updateStageDimensions = useCallback(() => {
     if (!stageContainerRef.current) return;
     const container = stageContainerRef.current;
@@ -202,45 +206,92 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
 
     if (availW <= 0 || availH <= 0) return;
 
-    if (!isMobileDevice) {
-      // ON COMPUTER / LARGE SCREENS: Fill available height and maximize width with minimal side margins
-      const targetAspect = videoDims.aspect || (16 / 9);
-      let renderW = availW;
-      let renderH = availW / targetAspect;
+    // 1. PURE WHITEBOARD DIRECT TOUCH / MOUSE DRAWING MODE:
+    if (inputMethodRef.current === 'touch_mouse') {
+      if (isMobileDevice) {
+        // On mobile and tablet: Whiteboard takes full available height and width (full-screen drawing canvas!)
+        setStageDimensions({
+          width: availW,
+          height: availH
+        });
+      } else {
+        // On desktop/PC: Fill height and maintain natural wide canvas (up to 16:9 or max available)
+        const targetAspect = 16 / 9;
+        const containerAspect = availW / availH;
+        let fitW: number;
+        let fitH: number;
 
-      if (renderH > availH) {
-        renderH = availH;
-        renderW = Math.round(availH * targetAspect);
+        if (containerAspect > targetAspect) {
+          fitH = availH;
+          fitW = Math.round(availH * targetAspect);
+        } else {
+          fitW = availW;
+          fitH = Math.round(availW / targetAspect);
+        }
+
+        setStageDimensions({
+          width: fitW,
+          height: fitH
+        });
       }
-
-      setStageDimensions({
-        width: Math.min(availW, Math.floor(renderW)),
-        height: Math.min(availH, Math.floor(renderH))
-      });
-    } else {
-      // ON MOBILE / TABLET: Keep the current suitable natural fit without overflowing viewport
-      const targetAspect = videoDims.aspect || (4 / 3);
-
-      let renderW = availW;
-      let renderH = availW / targetAspect;
-
-      if (renderH > availH) {
-        renderH = availH;
-        renderW = availH * targetAspect;
-      }
-
-      setStageDimensions({
-        width: Math.min(availW, Math.floor(renderW)),
-        height: Math.min(availH, Math.floor(renderH))
-      });
+      return;
     }
+
+    // 2. AR CAMERA HAND TRACKING MODE:
+    // Determine real aspect ratio directly from the live video element or measured stream
+    const video = videoRef.current;
+    let cameraAspect = videoDims.aspect;
+    if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+      cameraAspect = video.videoWidth / video.videoHeight;
+    }
+    if (!cameraAspect || cameraAspect <= 0) {
+      cameraAspect = availW >= availH ? (16 / 9) : (3 / 4);
+    }
+
+    // Perfect mathematical bounding-box fit with ZERO stretching or squishing in portrait or landscape:
+    const containerAspect = availW / availH;
+    let fitW: number;
+    let fitH: number;
+
+    if (containerAspect > cameraAspect) {
+      // Container is wider than camera stream (e.g. tablet in landscape): fit to container height
+      fitH = availH;
+      fitW = Math.round(availH * cameraAspect);
+    } else {
+      // Container is taller than camera stream (e.g. phone in portrait): fit to container width
+      fitW = availW;
+      fitH = Math.round(availW / cameraAspect);
+    }
+
+    setStageDimensions({
+      width: fitW,
+      height: fitH
+    });
   }, [isMobileDevice, videoDims.aspect]);
 
-  // Recalculate stage dimensions on resize or when video aspect changes
+  // Recalculate stage dimensions on resize, device orientation change, and video stream updates
   useEffect(() => {
     updateStageDimensions();
-    const handleResize = () => updateStageDimensions();
-    window.addEventListener('resize', handleResize);
+
+    const handleResizeOrOrientation = () => {
+      if (videoRef.current && videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
+        const vw = videoRef.current.videoWidth;
+        const vh = videoRef.current.videoHeight;
+        setVideoDims((prev) => {
+          if (prev.width !== vw || prev.height !== vh) {
+            return { width: vw, height: vh, aspect: vw / vh };
+          }
+          return prev;
+        });
+      }
+      updateStageDimensions();
+      setTimeout(updateStageDimensions, 120);
+      setTimeout(updateStageDimensions, 300);
+    };
+
+    window.addEventListener('resize', handleResizeOrOrientation);
+    window.addEventListener('orientationchange', handleResizeOrOrientation);
+    screen.orientation?.addEventListener?.('change', handleResizeOrOrientation);
 
     const observer = new ResizeObserver(() => updateStageDimensions());
     if (stageContainerRef.current) {
@@ -248,7 +299,9 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     }
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('resize', handleResizeOrOrientation);
+      window.removeEventListener('orientationchange', handleResizeOrOrientation);
+      screen.orientation?.removeEventListener?.('change', handleResizeOrOrientation);
       observer.disconnect();
     };
   }, [updateStageDimensions]);
@@ -546,9 +599,10 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     });
   };
 
-  const handleToggleButton = useCallback((force = false) => {
+  const handleToggleButton = useCallback((_force = false) => {
     const now = Date.now();
-    if (!force && now - lastButtonTriggerRef.current < 1200) {
+    // Strict cooldown of 1400ms between start and finish to completely prevent rapid double-toggling
+    if (now - lastButtonTriggerRef.current < 1400) {
       return;
     }
     lastButtonTriggerRef.current = now;
@@ -568,20 +622,29 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
   const [touchHoldProgress, setTouchHoldProgress] = useState(0);
   const touchHoldTimerRef = useRef<number | null>(null);
   const touchHoldStartRef = useRef<number | null>(null);
+  const touchHoldActiveRef = useRef<boolean>(false);
+  const touchTriggeredInCurrentTouchRef = useRef<boolean>(false);
 
   const startTouchHold = useCallback((e?: React.SyntheticEvent) => {
     if (e) {
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       e.stopPropagation();
     }
+    const now = Date.now();
+    // Guard against duplicate synthetic events, rapid re-triggers, or ongoing holds
+    if (touchHoldActiveRef.current || touchTriggeredInCurrentTouchRef.current) return;
+    if (now - lastButtonTriggerRef.current < 1400) return;
+
+    touchHoldActiveRef.current = true;
+    touchHoldStartRef.current = now;
+    setTouchHoldProgress(0);
+
     if (touchHoldTimerRef.current) {
       cancelAnimationFrame(touchHoldTimerRef.current);
     }
-    touchHoldStartRef.current = Date.now();
-    setTouchHoldProgress(0);
 
     const tick = () => {
-      if (!touchHoldStartRef.current) return;
+      if (!touchHoldStartRef.current || !touchHoldActiveRef.current) return;
       const elapsed = Date.now() - touchHoldStartRef.current;
       const progress = Math.min(100, (elapsed / HOLD_DURATION_MS) * 100);
       setTouchHoldProgress(progress);
@@ -589,6 +652,8 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       if (progress >= 100) {
         touchHoldStartRef.current = null;
         touchHoldTimerRef.current = null;
+        touchHoldActiveRef.current = false;
+        touchTriggeredInCurrentTouchRef.current = true; // Lock until finger lifted!
         setTouchHoldProgress(0);
         handleToggleButton(true);
         try {
@@ -611,6 +676,8 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       touchHoldTimerRef.current = null;
     }
     touchHoldStartRef.current = null;
+    touchHoldActiveRef.current = false;
+    touchTriggeredInCurrentTouchRef.current = false; // Reset lock when finger is physically lifted
     setTouchHoldProgress(0);
   }, []);
 
@@ -1008,7 +1075,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     }
 
     const now = Date.now();
-    const canTriggerButton = (now - lastButtonTriggerRef.current > 750) && !pinchMustReleaseRef.current;
+    const canTriggerButton = (now - lastButtonTriggerRef.current > 1400) && !pinchMustReleaseRef.current;
 
     // When hovering over the button, ensure pen does not draw lines across the button!
     if (isOverButton) {
@@ -1018,8 +1085,9 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       }
       lastDrawPosRef.current = null;
 
-      // Interaction A1: IMMEDIATE 2-FINGER PINCH 🤏 (سبابة وإبهام) over button!
-      if (isPinchingNow && canTriggerButton) {
+      // On PC: immediate 2-finger pinch 🤏 over button.
+      // On Mobile / Tablet: Require a deliberate hold / dwell (0.8s) so passing the hand over the front camera doesn't misfire!
+      if (!isMobileDevice && isPinchingNow && canTriggerButton) {
         pinchMustReleaseRef.current = true;
         lastButtonTriggerRef.current = now;
         dwellStartTimeRef.current = null;
@@ -1037,7 +1105,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       } else if (!dwellStartTimeRef.current) {
         dwellStartTimeRef.current = now;
       } else {
-        // Interaction A2: DWELL FALLBACK (Holding hand steadily over button for 0.8s)
+        // Dwell hold (0.8s hold with circular progress ring)
         const elapsed = now - dwellStartTimeRef.current;
         const progress = Math.min(100, Math.round((elapsed / 800) * 100));
         if (Math.abs(progress - dwellProgressRef.current) >= 4) {
@@ -1602,7 +1670,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             muted
             onLoadedMetadata={handleVideoLoadedMetadata}
             onResize={handleVideoLoadedMetadata}
-            className={`absolute inset-0 w-full h-full object-fill -scale-x-100 transition-opacity duration-300 pointer-events-none ${
+            className={`absolute inset-0 w-full h-full object-contain -scale-x-100 transition-opacity duration-300 pointer-events-none ${
               showVideo && inputMethod === 'hand' ? 'opacity-90' : 'opacity-0'
             }`}
             style={{
@@ -1616,7 +1684,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
               ref={guideCanvasRef}
               width={videoDims.width}
               height={videoDims.height}
-              className="absolute inset-0 w-full h-full object-fill pointer-events-none z-10 transition-all duration-200"
+              className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10 transition-all duration-200"
               style={{
                 filter:
                   inputMethod === 'touch_mouse'
@@ -1644,7 +1712,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerUp}
-              className={`absolute inset-0 w-full h-full object-fill cursor-crosshair z-20 touch-none ${
+              className={`absolute inset-0 w-full h-full object-contain cursor-crosshair z-20 touch-none ${
                 inputMethod === 'touch_mouse' ? 'pointer-events-auto' : 'pointer-events-none'
               }`}
             />
@@ -1655,7 +1723,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             ref={skeletonCanvasRef}
             width={videoDims.width}
             height={videoDims.height}
-            className={`absolute inset-0 w-full h-full object-fill pointer-events-none z-30 ${
+            className={`absolute inset-0 w-full h-full object-contain pointer-events-none z-30 ${
               inputMethod === 'touch_mouse' ? 'hidden' : 'block'
             }`}
           />
@@ -1670,16 +1738,9 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
                 onPointerUp={cancelTouchHold}
                 onPointerLeave={cancelTouchHold}
                 onPointerCancel={cancelTouchHold}
-                onTouchStart={startTouchHold}
-                onTouchEnd={cancelTouchHold}
-                onTouchCancel={cancelTouchHold}
-                onMouseDown={startTouchHold}
-                onMouseUp={cancelTouchHold}
-                onMouseLeave={cancelTouchHold}
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  // Instant tap prevented without hold on touch; if held, hold timer triggers handleToggleButton(true)
                 }}
                 className={`relative overflow-hidden w-13 h-13 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer shadow-2xl backdrop-blur-md select-none p-0 border-2 ${
                   buttonFeedback
