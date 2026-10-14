@@ -157,6 +157,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
   const airPinchStartTimeRef = useRef<number | null>(null);
   const threeFingerJoinStartTimeRef = useRef<number | null>(null);
   const pinchMustReleaseRef = useRef<boolean>(false);
+  const handleHandUpdateRef = useRef<(data: HandData) => void>(() => {});
 
   // Canvases and container refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -189,10 +190,20 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
   // Detect mobile / tablet
   useEffect(() => {
     const isMobile =
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-      (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1) ||
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Tablet/i.test(navigator.userAgent) ||
+      (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+      (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1 && window.innerWidth <= 1024) ||
       window.innerWidth <= 840;
+
     setIsMobileDevice(isMobile);
+    if (isMobile) {
+      // Permanently lock input method to direct touch/stylus whiteboard on mobile & tablet
+      setInputMethod('touch_mouse');
+      inputMethodRef.current = 'touch_mouse';
+      setShowVideo(false);
+      handTrackingService.pauseProcessing();
+      handTrackingService.stopTracking();
+    }
   }, []);
 
   // Update computed stage frame dimensions:
@@ -488,9 +499,14 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     }
   };
 
-  // Setup camera & MediaPipe tracking ONCE when joining (persists across waiting and drawing)
+  // Setup camera & MediaPipe tracking ONCE when joining (Desktop only!)
   useEffect(() => {
     if (flowState === 'gate') return;
+    if (isMobileDevice) {
+      // Completely disable camera & MediaPipe hand tracking on Mobile & Tablet
+      handTrackingService.stopTracking();
+      return;
+    }
     let mounted = true;
 
     const startCamera = async () => {
@@ -512,7 +528,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
           });
         }
 
-        handleHandUpdate(data);
+        handleHandUpdateRef.current(data);
       });
     };
 
@@ -521,7 +537,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       mounted = false;
       handTrackingService.stopTracking();
     };
-  }, [flowState, sensitivity, gestureMode]);
+  }, [flowState, sensitivity, gestureMode, isMobileDevice]);
 
   const clearCanvas = () => {
     if (userDrawCanvasRef.current) {
@@ -546,13 +562,19 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
   };
 
   const startDrawingSession = () => {
+    isFinishedRef.current = false;
+    setIsFinished(false);
     setIsSessionActive(true);
     isSessionActiveRef.current = true;
     startTimeRef.current = Date.now();
     setButtonFeedback(true);
     setTimeout(() => setButtonFeedback(false), 500);
     audioService.playChime();
-    audioService.speakArabic('بدأت جلسة الرسم! ضم أصابعك الثلاثة وابدأ التلوين ✍️');
+    if (inputMethodRef.current === 'hand') {
+      audioService.speakArabic('بدأت جلسة الرسم! ضم أصابعك الثلاثة وابدأ التلوين ✍️');
+    } else {
+      audioService.speakArabic('بدأت جلسة الرسم! ارسم بإصبعك على السبورة الآن ✍️');
+    }
   };
 
   const finishDrawingSession = () => {
@@ -599,10 +621,10 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     });
   };
 
-  const handleToggleButton = useCallback((_force = false) => {
+  const handleToggleButton = useCallback((force = false) => {
     const now = Date.now();
-    // Strict cooldown of 1400ms between start and finish to completely prevent rapid double-toggling
-    if (now - lastButtonTriggerRef.current < 1400) {
+    // Cooldown of 800ms between start and finish to prevent accidental rapid double-triggers (bypassed if force=true)
+    if (!force && now - lastButtonTriggerRef.current < 800) {
       return;
     }
     lastButtonTriggerRef.current = now;
@@ -1075,7 +1097,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     }
 
     const now = Date.now();
-    const canTriggerButton = (now - lastButtonTriggerRef.current > 1400) && !pinchMustReleaseRef.current;
+    const canTriggerButton = (now - lastButtonTriggerRef.current > 800) && !pinchMustReleaseRef.current;
 
     // When hovering over the button, ensure pen does not draw lines across the button!
     if (isOverButton) {
@@ -1085,11 +1107,9 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       }
       lastDrawPosRef.current = null;
 
-      // On PC: immediate 2-finger pinch 🤏 over button.
-      // On Mobile / Tablet: Require a deliberate hold / dwell (0.8s) so passing the hand over the front camera doesn't misfire!
+      // On PC: immediate 2-finger pinch 🤏 over button or 0.8s dwell hover
       if (!isMobileDevice && isPinchingNow && canTriggerButton) {
         pinchMustReleaseRef.current = true;
-        lastButtonTriggerRef.current = now;
         dwellStartTimeRef.current = null;
         if (dwellProgressRef.current !== 0) {
           dwellProgressRef.current = 0;
@@ -1114,7 +1134,6 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
         }
         if (elapsed >= 800 && canTriggerButton) {
           pinchMustReleaseRef.current = true;
-          lastButtonTriggerRef.current = now;
           dwellStartTimeRef.current = null;
           dwellProgressRef.current = 0;
           setDwellProgress(0);
@@ -1387,6 +1406,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       }
     }
   }, [brushColor, handleToggleButton, processDrawPoint]);
+  handleHandUpdateRef.current = handleHandUpdate;
 
   // Fullscreen toggle
   const toggleFullscreen = () => {
@@ -1553,48 +1573,75 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             </div>
           )}
 
-          {/* Toggle Input Method: 1. Hand Tracking vs 2. Whiteboard Touch/Mouse */}
-          <div className="flex items-center bg-slate-950 p-1 rounded-2xl border border-slate-700/80 shadow-inner">
+          {/* Mobile & Tablet Dedicated Instant Start / Finish Button */}
+          {isMobileDevice && flowState === 'drawing' && (
             <button
-              onClick={() => {
-                if (inputMethod !== 'hand') {
-                  setInputMethod('hand');
-                  audioService.speakArabic('وضع تتبع حركة اليد أمام الكاميرا');
-                }
-              }}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                inputMethod === 'hand'
-                  ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold ring-2 ring-amber-400/30'
-                  : 'text-slate-400 hover:text-white'
+              type="button"
+              onClick={() => handleToggleButton(true)}
+              className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl font-black text-xs sm:text-sm flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer ${
+                !isSessionActive
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30 ring-2 ring-emerald-400/40'
+                  : 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30 ring-2 ring-rose-400/40 animate-pulse'
               }`}
-              title="النوع الأول: تتبع حركة اليد أمام الكاميرا ✋"
             >
-              <Hand className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">تتبع اليد ✋</span>
-              <span className="sm:hidden">يد</span>
+              {!isSessionActive ? (
+                <>
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>ابدأ الرسم</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+                  <span>إنهاء وحفظ</span>
+                </>
+              )}
             </button>
-            <button
-              onClick={() => {
-                if (inputMethod !== 'touch_mouse') {
-                  setInputMethod('touch_mouse');
-                  audioService.speakArabic('السبورة البيضاء: يمكنك الآن الرسم باللمس أو بالفأرة');
-                }
-              }}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                inputMethod === 'touch_mouse'
-                  ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold ring-2 ring-amber-400/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-              title="النوع الثاني: السبورة البيضاء (لمس / ماوس) 🖌️"
-            >
-              <PenTool className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">فأرة / لمس 🖱️</span>
-              <span className="sm:hidden">لمس</span>
-            </button>
-          </div>
+          )}
 
-          {/* Toggle Video Feed (only in hand mode) */}
-          {inputMethod === 'hand' && (
+          {/* Desktop Only: Toggle Input Method (Hand Tracking vs Whiteboard Mouse) */}
+          {!isMobileDevice && (
+            <div className="flex items-center bg-slate-950 p-1 rounded-2xl border border-slate-700/80 shadow-inner">
+              <button
+                onClick={() => {
+                  if (inputMethod !== 'hand') {
+                    setInputMethod('hand');
+                    audioService.speakArabic('وضع تتبع حركة اليد أمام الكاميرا');
+                  }
+                }}
+                className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  inputMethod === 'hand'
+                    ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold ring-2 ring-amber-400/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="النوع الأول: تتبع حركة اليد أمام الكاميرا ✋"
+              >
+                <Hand className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">تتبع اليد ✋</span>
+                <span className="sm:hidden">يد</span>
+              </button>
+              <button
+                onClick={() => {
+                  if (inputMethod !== 'touch_mouse') {
+                    setInputMethod('touch_mouse');
+                    audioService.speakArabic('السبورة البيضاء: يمكنك الآن الرسم باللمس أو بالفأرة');
+                  }
+                }}
+                className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  inputMethod === 'touch_mouse'
+                    ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold ring-2 ring-amber-400/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="النوع الثاني: السبورة البيضاء (لمس / ماوس) 🖌️"
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">فأرة / لمس 🖱️</span>
+                <span className="sm:hidden">لمس</span>
+              </button>
+            </div>
+          )}
+
+          {/* Desktop Only: Toggle Video Feed (only in hand mode) */}
+          {!isMobileDevice && inputMethod === 'hand' && (
             <button
               onClick={() => setShowVideo(!showVideo)}
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs"
@@ -1728,21 +1775,18 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             }`}
           />
 
-          {/* Interactive In-Canvas Button (Start / Finish Session - Compact Icon-Only with Circular Hold Progress) */}
-          {flowState === 'drawing' && (
+          {/* Interactive In-Canvas Button (Start / Finish Session) - PC & Desktop Only */}
+          {!isMobileDevice && flowState === 'drawing' && (
             <div className="absolute top-3 sm:top-4 right-3 sm:right-4 z-50 flex flex-col items-end gap-1.5 pointer-events-auto">
               <button
                 ref={actionButtonRef}
                 type="button"
-                onPointerDown={startTouchHold}
-                onPointerUp={cancelTouchHold}
-                onPointerLeave={cancelTouchHold}
-                onPointerCancel={cancelTouchHold}
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  handleToggleButton(true);
                 }}
-                className={`relative overflow-hidden w-13 h-13 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer shadow-2xl backdrop-blur-md select-none p-0 border-2 ${
+                className={`relative overflow-hidden w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer shadow-2xl backdrop-blur-md select-none p-0 border-2 ${
                   buttonFeedback
                     ? 'scale-95 ring-8 ring-amber-400 bg-amber-400 text-slate-950'
                     : !isSessionActive
@@ -1755,16 +1799,15 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
                 }`}
                 title={
                   !isSessionActive
-                    ? 'المس مطولاً (0.8ث) أو اقبض بإصبعين 🤏 في الهواء لبدء الرسم'
-                    : 'المس مطولاً (0.8ث) أو اقبض بإصبعين 🤏 في الهواء لإنهاء وحفظ النتيجة'
+                    ? 'انقر بالفأرة أو اقبض بإصبعين 🤏 في الهواء لبدء الرسم'
+                    : 'انقر بالفأرة أو اقبض بإصبعين 🤏 في الهواء لإنهاء وحفظ النتيجة'
                 }
               >
-                {/* Circular Progress Ring (Fills smoothly during touch hold or hand dwell/pinch) */}
+                {/* Circular Progress Ring */}
                 <svg
                   className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none p-0.5"
                   viewBox="0 0 64 64"
                 >
-                  {/* Background circle track */}
                   <circle
                     cx="32"
                     cy="32"
@@ -1773,8 +1816,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
                     stroke="rgba(0,0,0,0.25)"
                     strokeWidth="4"
                   />
-                  {/* Active progress track */}
-                  {actionButtonProgress > 0 && (
+                  {dwellProgress > 0 && (
                     <circle
                       cx="32"
                       cy="32"
@@ -1783,14 +1825,14 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
                       stroke="#fbbf24"
                       strokeWidth="4.5"
                       strokeDasharray="169.6"
-                      strokeDashoffset={169.6 * (1 - actionButtonProgress / 100)}
+                      strokeDashoffset={169.6 * (1 - dwellProgress / 100)}
                       strokeLinecap="round"
                       className="transition-all duration-75"
                     />
                   )}
                 </svg>
 
-                {/* Clear Prominent Icon Only (Zero text inside button!) */}
+                {/* Clear Prominent Icon Only */}
                 {!isSessionActive ? (
                   <Play className="w-6 h-6 sm:w-7 sm:h-7 fill-current ml-0.5 drop-shadow-md text-slate-950 transition-transform active:scale-95" />
                 ) : (
@@ -1798,17 +1840,10 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
                 )}
               </button>
 
-              {/* Micro-hint on Hold or Hover: Feedback without taking screen space */}
-              {touchHoldProgress > 0 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-950/90 text-amber-300 border border-amber-500/40 shadow pointer-events-none animate-in fade-in">
-                  جارٍ التفعيل {Math.round(touchHoldProgress)}%
-                </span>
-              )}
-              {inputMethod === 'hand' && isHoveringButton && touchHoldProgress === 0 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-950/90 text-emerald-300 border border-emerald-500/40 shadow pointer-events-none animate-bounce">
-                  اقبض بإصبعين 🤏 للنقر
-                </span>
-              )}
+              {/* Tooltip hint on Desktop */}
+              <div className="bg-slate-900/90 border border-slate-700/80 px-2.5 py-0.5 rounded-lg text-[10px] font-bold text-slate-200 shadow-md pointer-events-none">
+                {!isSessionActive ? 'ابدأ الرسم ◀️' : 'إنهاء وحفظ ✔️'}
+              </div>
             </div>
           )}
 

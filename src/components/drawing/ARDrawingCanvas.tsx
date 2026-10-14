@@ -310,11 +310,11 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
   }, [attempts, drawing, onComplete, student]);
 
   // Unified Toggle: Start Drawing / Finish Drawing
-  const handleToggleButtonSession = useCallback((_force = false) => {
+  const handleToggleButtonSession = useCallback((force = false) => {
     const now = Date.now();
-    // Strict cooldown of 1400ms between start and finish to completely prevent rapid double-toggling
-    if (now - lastButtonTriggerRef.current < 1400) {
-      return; // Cooldown 1.4s to prevent rapid start/stop cycling
+    // Cooldown of 800ms between start and finish unless forced
+    if (!force && now - lastButtonTriggerRef.current < 800) {
+      return;
     }
     lastButtonTriggerRef.current = now;
     dwellStartTimeRef.current = null;
@@ -1164,15 +1164,16 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             />
           )}
 
-          {/* Interactive In-Canvas Action Button (Compact Icon Only with Hold Duration & SVG Progress Ring) */}
+          {/* Interactive In-Canvas Action Button (Compact Icon Only with Direct Click & Gesture Support) */}
           <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-40 pointer-events-auto flex flex-col items-center gap-1.5">
             <button
               ref={actionButtonRef}
               type="button"
-              onPointerDown={startTouchHold}
-              onPointerUp={cancelTouchHold}
-              onPointerLeave={cancelTouchHold}
-              onPointerCancel={cancelTouchHold}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleToggleButtonSession(true);
+              }}
               className={`relative w-13 h-13 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-all duration-200 cursor-pointer shadow-2xl backdrop-blur-md select-none touch-none ${
                 buttonClickFeedback
                   ? 'scale-90 ring-8 ring-amber-400 bg-amber-400 text-slate-950'
