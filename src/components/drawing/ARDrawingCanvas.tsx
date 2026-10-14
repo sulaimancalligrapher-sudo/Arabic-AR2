@@ -23,7 +23,9 @@ import {
   PenTool,
   Sparkles,
   Sliders,
-  Play
+  Play,
+  Hand,
+  X
 } from 'lucide-react';
 import { HandCalibrationModal } from '../HandCalibrationModal';
 
@@ -132,12 +134,87 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const stageFrameRef = useRef<HTMLDivElement | null>(null);
 
+  // Mobile / Tablet detection
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
+  const [isToolsOpen, setIsToolsOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      const isMobile =
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Tablet/i.test(navigator.userAgent) ||
+        (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+        (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1 && window.innerWidth <= 1024) ||
+        window.innerWidth <= 840;
+      setIsMobileDevice(isMobile);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
   // Performance & Throttle Refs to prevent lag on mobile and tablet
   const isHoveringButtonRef = useRef(false);
   const dwellProgressRef = useRef(0);
   const accuracyRef = useRef(0);
   const coverageRef = useRef(0);
   const lastAccuracyUpdateRef = useRef(0);
+
+  // Dynamic stage pixel dimensions guaranteeing zero stretching or squishing in portrait or landscape
+  const [stageDimensions, setStageDimensions] = useState<{ width: number; height: number }>({
+    width: 700,
+    height: 520
+  });
+
+  const updateStageDimensions = useCallback(() => {
+    if (!containerRef.current) return;
+    const container = containerRef.current;
+    const paddingX = isMobileDevice ? 8 : 24;
+    const paddingY = isMobileDevice ? 8 : 24;
+    const availW = Math.max(160, container.clientWidth - paddingX);
+    const availH = Math.max(160, container.clientHeight - paddingY);
+
+    const targetAspect = (videoDimensions.width && videoDimensions.height && videoDimensions.width > 0 && videoDimensions.height > 0)
+      ? videoDimensions.width / videoDimensions.height
+      : (700 / 520);
+
+    let fitW: number;
+    let fitH: number;
+
+    if (availW / availH > targetAspect) {
+      fitH = availH;
+      fitW = Math.round(availH * targetAspect);
+    } else {
+      fitW = availW;
+      fitH = Math.round(availW / targetAspect);
+    }
+
+    setStageDimensions({
+      width: fitW,
+      height: fitH
+    });
+  }, [isMobileDevice, videoDimensions.width, videoDimensions.height]);
+
+  useEffect(() => {
+    updateStageDimensions();
+    const handleResize = () => {
+      updateStageDimensions();
+      setTimeout(updateStageDimensions, 100);
+      setTimeout(updateStageDimensions, 300);
+    };
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    screen.orientation?.addEventListener?.('change', handleResize);
+
+    const observer = new ResizeObserver(() => updateStageDimensions());
+    if (containerRef.current) observer.observe(containerRef.current);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+      screen.orientation?.removeEventListener?.('change', handleResize);
+      observer.disconnect();
+    };
+  }, [updateStageDimensions]);
 
   // State Refs to prevent 60FPS loop stale closures
   const isPenDownRef = useRef(false);
@@ -992,41 +1069,128 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
   return (
     <div className="relative w-full max-w-5xl mx-auto rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden flex flex-col min-h-[620px]">
       
-      {/* Top Bar */}
-      <div className="px-5 py-3 border-b border-slate-800 bg-slate-800/80 backdrop-blur-md flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="p-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
-            title="العودة للاستوديو"
-          >
-            <ChevronRight className="w-5 h-5" />
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-base font-bold text-white font-serif">{drawing.title}</h3>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                {drawing.mode === 'color' ? 'وضع التلوين' : 'تتبع الخط'}
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">{drawing.description}</p>
-          </div>
-        </div>
-
-        {/* Live Gauges & Controls */}
-        <div className="flex items-center gap-3">
-          {/* Live Accuracy Meter */}
-          <div className="flex items-center gap-2 bg-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-700 shadow-inner">
-            <Activity className="w-4 h-4 text-emerald-400" />
-            <div className="text-right">
-              <div className="text-[10px] text-slate-400 font-semibold leading-none">نسبة الإتقان</div>
-              <div className="text-sm font-bold font-mono text-emerald-400 leading-tight">
-                {coverage}% <span className="text-[10px] text-slate-500">/ {drawing.targetAccuracy}%</span>
+      {/* Top Bar: Separate layouts for Mobile/Tablet vs Desktop */}
+      {isMobileDevice ? (
+        /* Mobile & Tablet Dedicated Compact 2-Row Top Bar */
+        <div className="px-3 py-2 border-b border-slate-800 bg-slate-800/90 backdrop-blur-md flex flex-col gap-2">
+          {/* Row 1: Back Button + Title & Description / Mode */}
+          <div className="flex items-center justify-between gap-2 w-full">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                type="button"
+                onClick={onBack}
+                className="p-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors shrink-0 cursor-pointer"
+                title="العودة للاستوديو"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h3 className="text-sm font-bold text-white font-serif truncate">{drawing.title}</h3>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                    {drawing.mode === 'color' ? 'تلوين' : 'تتبع'}
+                  </span>
+                </div>
+                {drawing.description && (
+                  <p className="text-[11px] text-slate-400 truncate">{drawing.description}</p>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Input Device Switch: 1. Hand Tracking, 2. Mouse / Finger Touch */}
+          {/* Row 2: Accuracy Gauge + Mode Icon Buttons (Hand ✋ & Pen 🖊️) + Video toggle (if hand mode) */}
+          <div className="flex items-center justify-between gap-2 w-full pt-1.5 border-t border-slate-700/60">
+            {/* Accuracy Meter */}
+            <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-700">
+              <Activity className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="text-[10px] text-slate-400 font-semibold">الإتقان:</span>
+              <span className="text-xs font-bold font-mono text-emerald-400">
+                {coverage}% <span className="text-[9px] text-slate-500">/ {drawing.targetAccuracy}%</span>
+              </span>
+            </div>
+
+            {/* Mode Buttons (Icons Only: Hand for tracking, Pen for mouse/touch - No Text Labels!) */}
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-700">
+                {/* Hand Tracking Button: Hand Icon only */}
+                <button
+                  type="button"
+                  onClick={() => setInputMode('ar_hand')}
+                  className={`p-1.5 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                    inputMode === 'ar_hand'
+                      ? 'bg-amber-500 text-slate-950 shadow-md ring-2 ring-amber-400/30'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="تتبع حركة اليد أمام الكاميرا ✋"
+                >
+                  <Hand className="w-4 h-4" />
+                </button>
+
+                {/* Mouse / Touch Button: Pen Icon only */}
+                <button
+                  type="button"
+                  onClick={() => setInputMode('mouse_touch')}
+                  className={`p-1.5 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                    inputMode === 'mouse_touch'
+                      ? 'bg-amber-500 text-slate-950 shadow-md ring-2 ring-amber-400/30'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="الرسم باللمس أو الفأرة 🖊️"
+                >
+                  <PenTool className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Toggle Video Feed (only in hand mode) */}
+              {inputMode === 'ar_hand' && (
+                <button
+                  type="button"
+                  onClick={() => setShowVideoFeed(!showVideoFeed)}
+                  className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs cursor-pointer"
+                  title={showVideoFeed ? 'إخفاء معاينة الكاميرا' : 'إظهار الكاميرا'}
+                >
+                  {showVideoFeed ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* Desktop Top Bar: 100% Intact and Unchanged */
+        <div className="px-5 py-3 border-b border-slate-800 bg-slate-800/80 backdrop-blur-md flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onBack}
+              className="p-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white transition-colors"
+              title="العودة للاستوديو"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-white font-serif">{drawing.title}</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {drawing.mode === 'color' ? 'وضع التلوين' : 'تتبع الخط'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">{drawing.description}</p>
+            </div>
+          </div>
+
+          {/* Live Gauges & Controls on Desktop */}
+          <div className="flex items-center gap-3">
+            {/* Live Accuracy Meter */}
+            <div className="flex items-center gap-2 bg-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-700 shadow-inner">
+              <Activity className="w-4 h-4 text-emerald-400" />
+              <div className="text-right">
+                <div className="text-[10px] text-slate-400 font-semibold leading-none">نسبة الإتقان</div>
+                <div className="text-sm font-bold font-mono text-emerald-400 leading-tight">
+                  {coverage}% <span className="text-[10px] text-slate-500">/ {drawing.targetAccuracy}%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Input Device Switch: 1. Hand Tracking, 2. Mouse / Finger Touch */}
             <div className="flex items-center bg-slate-950 p-1 rounded-2xl border border-slate-700/90 shadow-inner">
               <button
                 onClick={() => setInputMode('ar_hand')}
@@ -1054,45 +1218,47 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
               </button>
             </div>
 
-          {/* Hand Lab Button */}
-          {inputMode === 'ar_hand' && (
-            <button
-              onClick={() => setIsCalibrationOpen(true)}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center gap-1"
-              title="مختبر فحص اليد والكاميرا"
-            >
-              <Sun className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">المعايرة</span>
-            </button>
-          )}
+            {/* Hand Lab Button */}
+            {inputMode === 'ar_hand' && (
+              <button
+                onClick={() => setIsCalibrationOpen(true)}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center gap-1"
+                title="مختبر فحص اليد والكاميرا"
+              >
+                <Sun className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">المعايرة</span>
+              </button>
+            )}
 
-          {/* Toggle Video Feed */}
-          {inputMode === 'ar_hand' && (
-            <button
-              onClick={() => setShowVideoFeed(!showVideoFeed)}
-              className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white border border-slate-700 text-xs"
-              title={showVideoFeed ? 'إخفاء معاينة الكاميرا' : 'إظهار الكاميرا'}
-            >
-              {showVideoFeed ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-            </button>
-          )}
+            {/* Toggle Video Feed */}
+            {inputMode === 'ar_hand' && (
+              <button
+                onClick={() => setShowVideoFeed(!showVideoFeed)}
+                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white border border-slate-700 text-xs"
+                title={showVideoFeed ? 'إخفاء معاينة الكاميرا' : 'إظهار الكاميرا'}
+              >
+                {showVideoFeed ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Main Drawing Stage Area */}
       <div
         ref={containerRef}
         className="relative flex-1 w-full bg-slate-950 flex items-center justify-center p-1 sm:p-4 overflow-hidden select-none min-h-[340px] sm:min-h-[460px] md:min-h-[520px]"
       >
-        {/* Dynamic Aspect-Ratio Frame: Video & Canvases matched 1:1 for perfect skeleton alignment */}
+        {/* Dynamic Aspect-Ratio Frame: Matched 1:1 in exact pixels to prevent any stretching or squishing */}
         <div
           ref={stageFrameRef}
           style={{
-            aspectRatio: `${videoDimensions.width} / ${videoDimensions.height}`,
+            width: `${stageDimensions.width}px`,
+            height: `${stageDimensions.height}px`,
             maxWidth: '100%',
-            maxHeight: 'calc(100vh - 160px)'
+            maxHeight: '100%'
           }}
-          className="relative w-full max-w-[850px] rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 shadow-2xl flex items-center justify-center mx-auto"
+          className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 shadow-2xl flex items-center justify-center mx-auto transition-all duration-200"
         >
           {/* Layer 1: Background Video Camera */}
           <video
@@ -1114,7 +1280,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             ref={guideCanvasRef}
             width={videoDimensions.width}
             height={videoDimensions.height}
-            className="absolute inset-0 w-full h-full object-fill pointer-events-none z-10 transition-all duration-200"
+            className="absolute inset-0 w-full h-full object-contain pointer-events-none z-10 transition-all duration-200"
             style={{
               filter: guideColor === 'yellow'
                 ? 'drop-shadow(0 0 6px rgba(250, 204, 21, 0.8)) drop-shadow(0 0 14px rgba(234, 179, 8, 0.45))'
@@ -1151,7 +1317,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
-            className="absolute inset-0 w-full h-full object-fill cursor-crosshair z-20 touch-none select-none overscroll-none drawing-canvas-surface"
+            className="absolute inset-0 w-full h-full object-contain cursor-crosshair z-20 touch-none select-none overscroll-none drawing-canvas-surface"
           />
 
           {/* Layer 4: MediaPipe Hand Landmark Skeleton Canvas */}
@@ -1160,11 +1326,12 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
               ref={skeletonCanvasRef}
               width={videoDimensions.width}
               height={videoDimensions.height}
-              className="absolute inset-0 w-full h-full object-fill pointer-events-none z-30"
+              className="absolute inset-0 w-full h-full object-contain pointer-events-none z-30"
             />
           )}
 
-          {/* Interactive In-Canvas Action Button (Compact Icon Only with Direct Click & Gesture Support) */}
+          {/* Interactive In-Canvas Action Button: PC Desktop only! */}
+          {!isMobileDevice && (
           <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-40 pointer-events-auto flex flex-col items-center gap-1.5">
             <button
               ref={actionButtonRef}
@@ -1244,6 +1411,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
               </span>
             )}
           </div>
+          )}
         </div>
 
         {/* Camera Starting Overlay */}
@@ -1394,132 +1562,54 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
         )}
       </div>
 
-      {/* Bottom Tool Bar: Palette, Guide Line Color, Thickness, Opacity, Clear, Sound */}
-      <div className="px-5 py-3 border-t border-slate-800 bg-slate-900 flex flex-wrap items-center justify-between gap-4">
-        
-        {/* Guide Color & Brush Palette */}
-        <div className="flex items-center gap-4 flex-wrap">
-          {/* Guide Line Color (لون خط التتبع المطلوب رسمه) */}
-          <div className="flex items-center gap-2 pl-3 border-l border-slate-800">
-            <Sparkles className="w-4 h-4 text-amber-400" />
-            <span className="text-xs text-amber-300 font-bold hidden sm:inline">لون خط الإرشاد:</span>
-            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
-              {GUIDE_LINE_COLORS.map(c => (
-                <button
-                  key={c.id}
-                  onClick={() => setGuideColor(c.id)}
-                  style={{ backgroundColor: c.hex }}
-                  className={`w-5 h-5 rounded-full transition-transform cursor-pointer border ${
-                    guideColor === c.id
-                      ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-slate-900 border-white shadow-lg'
-                      : 'opacity-70 hover:opacity-100 border-slate-700'
-                  }`}
-                  title={`خط إرشادي: ${c.name}`}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* User Brush Colors */}
+      {/* Bottom Tool Bar: Separate layouts for Mobile/Tablet vs Desktop */}
+      {isMobileDevice ? (
+        /* Mobile & Tablet Dedicated Compact Single-Row Bottom Bar */
+        <div className="px-3 py-2.5 border-t border-slate-800 bg-slate-900/95 backdrop-blur-md flex items-center justify-between gap-2 z-30">
           <div className="flex items-center gap-2">
-            <Palette className="w-4 h-4 text-slate-400" />
-            <span className="text-xs text-slate-400 font-semibold hidden sm:inline">لون الفرشاة:</span>
-            <div className="flex items-center gap-1.5">
-              {PALETTE_COLORS.map(c => (
-                <button
-                  key={c.hex}
-                  onClick={() => setBrushColor(c.hex)}
-                  style={{ backgroundColor: c.hex }}
-                  className={`w-6 h-6 rounded-full transition-transform cursor-pointer ${
-                    brushColor === c.hex ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-slate-900 shadow-md' : 'opacity-80 hover:opacity-100'
-                  }`}
-                  title={c.name}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Thickness, Opacity & Sensitivity */}
-        <div className="flex items-center gap-4 text-xs text-slate-400 flex-wrap">
-          {/* Sensitivity Selector */}
-          {inputMode === 'ar_hand' && (
-            <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-800">
-              <Sliders className="w-3.5 h-3.5 text-amber-400" />
-              <span className="text-[11px] text-slate-300 font-medium hidden sm:inline">حساسية الضم:</span>
-              <div className="flex items-center bg-slate-900 p-0.5 rounded-lg border border-slate-700">
-                {(['easy', 'normal', 'strict'] as PinchSensitivity[]).map(s => (
-                  <button
-                    key={s}
-                    onClick={() => {
-                      setSensitivity(s);
-                      handTrackingService.setSensitivity(s);
-                    }}
-                    className={`px-2 py-0.5 text-[10px] rounded transition-colors cursor-pointer ${
-                      sensitivity === s ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {s === 'easy' ? 'سهلة' : s === 'normal' ? 'متوسطة' : 'دقيقة'}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Brush Size */}
-          <div className="flex items-center gap-2">
-            <span>سُمك الخط:</span>
-            <input
-              type="range"
-              min="10"
-              max="45"
-              value={brushSize}
-              onChange={(e) => setBrushSize(Number(e.target.value))}
-              className="w-20 accent-amber-500 cursor-pointer"
-            />
-          </div>
-
-          {/* Outline Transparency */}
-          <div className="flex items-center gap-2">
-            <span>شفافية الرسمة:</span>
-            <input
-              type="range"
-              min="0.10"
-              max="0.60"
-              step="0.05"
-              value={opacity}
-              onChange={(e) => setOpacity(Number(e.target.value))}
-              className="w-20 accent-amber-500 cursor-pointer"
-            />
-          </div>
-        </div>
-
-        {/* Actions: Clear, Sound, Check */}
-        <div className="flex items-center gap-2">
-          {drawing.arabicAudioText && (
+            {/* 1. Tools Button (الأدوات) -> Opens Modal */}
             <button
-              onClick={() => audioService.speakArabic(drawing.arabicAudioText!)}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs flex items-center gap-1"
-              title="نطق اسم الرسمة"
+              type="button"
+              onClick={() => setIsToolsOpen(true)}
+              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+              title="فتح نافذة أدوات الرسم والتلوين"
             >
-              <Volume2 className="w-4 h-4" />
+              <Palette className="w-4 h-4 text-amber-400" />
+              <span>الأدوات</span>
             </button>
-          )}
 
-          <button
-            onClick={clearCanvas}
-            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>مسح اللوحة</span>
-          </button>
+            {/* 2. Clear Canvas Button (مسح اللوحة) */}
+            <button
+              type="button"
+              onClick={clearCanvas}
+              className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold flex items-center gap-1 active:scale-95 transition-colors cursor-pointer"
+              title="مسح اللوحة"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">مسح</span>
+            </button>
 
+            {/* 3. Sound Button (الصوت) */}
+            {drawing.arabicAudioText && (
+              <button
+                type="button"
+                onClick={() => audioService.speakArabic(drawing.arabicAudioText!)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs flex items-center justify-center active:scale-95 transition-colors cursor-pointer"
+                title="نطق اسم الرسمة"
+              >
+                <Volume2 className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {/* 4. Start / Finish & Evaluate Button (ابدأ الرسم / إنهاء وتقييم) */}
           <button
+            type="button"
             onClick={() => handleToggleButtonSession(true)}
-            className={`px-4 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-lg transition-all cursor-pointer ${
+            className={`px-4 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer ${
               !isDrawingSessionActive
-                ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20'
-                : 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/20'
+                ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20 ring-1 ring-emerald-400/50'
+                : 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/20 ring-1 ring-rose-400/50 animate-pulse'
             }`}
           >
             {!isDrawingSessionActive ? (
@@ -1529,23 +1619,312 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
               </>
             ) : (
               <>
-                <CheckCircle2 className="w-3.5 h-3.5" />
+                <CheckCircle2 className="w-3.5 h-3.5 stroke-[2.5]" />
                 <span>إنهاء وتقييم</span>
               </>
             )}
           </button>
         </div>
-      </div>
+      ) : (
+        /* Desktop Bottom Tool Bar: 100% Intact & Unchanged */
+        <div className="px-5 py-3 border-t border-slate-800 bg-slate-900 flex flex-wrap items-center justify-between gap-4">
+          {/* Guide Color & Brush Palette */}
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Guide Line Color (لون خط التتبع المطلوب رسمه) */}
+            <div className="flex items-center gap-2 pl-3 border-l border-slate-800">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span className="text-xs text-amber-300 font-bold hidden sm:inline">لون خط الإرشاد:</span>
+              <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                {GUIDE_LINE_COLORS.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => setGuideColor(c.id)}
+                    style={{ backgroundColor: c.hex }}
+                    className={`w-5 h-5 rounded-full transition-transform cursor-pointer border ${
+                      guideColor === c.id
+                        ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-slate-900 border-white shadow-lg'
+                        : 'opacity-70 hover:opacity-100 border-slate-700'
+                    }`}
+                    title={`خط إرشادي: ${c.name}`}
+                  />
+                ))}
+              </div>
+            </div>
 
-      {/* Hand Calibration Modal */}
-      <HandCalibrationModal
-        isOpen={isCalibrationOpen}
-        onClose={() => setIsCalibrationOpen(false)}
-        onSwitchToMouseMode={() => {
-          setInputMode('mouse_touch');
-          setIsCalibrationOpen(false);
-        }}
-      />
+            {/* User Brush Colors */}
+            <div className="flex items-center gap-2">
+              <Palette className="w-4 h-4 text-slate-400" />
+              <span className="text-xs text-slate-400 font-semibold hidden sm:inline">لون الفرشاة:</span>
+              <div className="flex items-center gap-1.5">
+                {PALETTE_COLORS.map(c => (
+                  <button
+                    key={c.hex}
+                    onClick={() => setBrushColor(c.hex)}
+                    style={{ backgroundColor: c.hex }}
+                    className={`w-6 h-6 rounded-full transition-transform cursor-pointer ${
+                      brushColor === c.hex ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-slate-900 shadow-md' : 'opacity-80 hover:opacity-100'
+                    }`}
+                    title={c.name}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Thickness, Opacity & Sensitivity */}
+          <div className="flex items-center gap-4 text-xs text-slate-400 flex-wrap">
+            {/* Sensitivity Selector */}
+            {inputMode === 'ar_hand' && (
+              <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-800">
+                <Sliders className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-[11px] text-slate-300 font-medium hidden sm:inline">حساسية الضم:</span>
+                <div className="flex items-center bg-slate-900 p-0.5 rounded-lg border border-slate-700">
+                  {(['easy', 'normal', 'strict'] as PinchSensitivity[]).map(s => (
+                    <button
+                      key={s}
+                      onClick={() => {
+                        setSensitivity(s);
+                        handTrackingService.setSensitivity(s);
+                      }}
+                      className={`px-2 py-0.5 text-[10px] rounded transition-colors cursor-pointer ${
+                        sensitivity === s ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {s === 'easy' ? 'سهلة' : s === 'normal' ? 'متوسطة' : 'دقيقة'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Brush Size */}
+            <div className="flex items-center gap-2">
+              <span>سُمك الخط:</span>
+              <input
+                type="range"
+                min="10"
+                max="45"
+                value={brushSize}
+                onChange={(e) => setBrushSize(Number(e.target.value))}
+                className="w-20 accent-amber-500 cursor-pointer"
+              />
+            </div>
+
+            {/* Outline Transparency */}
+            <div className="flex items-center gap-2">
+              <span>شفافية الرسمة:</span>
+              <input
+                type="range"
+                min="0.10"
+                max="0.60"
+                step="0.05"
+                value={opacity}
+                onChange={(e) => setOpacity(Number(e.target.value))}
+                className="w-20 accent-amber-500 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          {/* Actions: Clear, Sound, Check */}
+          <div className="flex items-center gap-2">
+            {drawing.arabicAudioText && (
+              <button
+                onClick={() => audioService.speakArabic(drawing.arabicAudioText!)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs flex items-center gap-1 cursor-pointer"
+                title="نطق اسم الرسمة"
+              >
+                <Volume2 className="w-4 h-4" />
+              </button>
+            )}
+
+            <button
+              onClick={clearCanvas}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>مسح اللوحة</span>
+            </button>
+
+            <button
+              onClick={() => handleToggleButtonSession(true)}
+              className={`px-4 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-lg transition-all cursor-pointer ${
+                !isDrawingSessionActive
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20'
+                  : 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/20'
+              }`}
+            >
+              {!isDrawingSessionActive ? (
+                <>
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>ابدأ الرسم</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>إنهاء وتقييم</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile & Tablet Dedicated Tools Modal (Opened by clicking "الأدوات" button) */}
+      {isMobileDevice && isToolsOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Palette className="w-5 h-5 text-amber-400" />
+                <h3 className="text-base font-bold text-white font-serif">أدوات الرسم والتلوين 🎨</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsToolsOpen(false)}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="إغلاق"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* 1. Guide Line Color */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>لون خط الإرشاد (الرسمة المطلوب تتبعها):</span>
+              </div>
+              <div className="flex items-center gap-2.5 bg-slate-950 p-2.5 rounded-2xl border border-slate-800 flex-wrap">
+                {GUIDE_LINE_COLORS.map(c => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setGuideColor(c.id)}
+                    style={{ backgroundColor: c.hex }}
+                    className={`w-7 h-7 rounded-full transition-transform cursor-pointer border ${
+                      guideColor === c.id
+                        ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-slate-900 border-white shadow-lg'
+                        : 'opacity-70 hover:opacity-100 border-slate-700'
+                    }`}
+                    title={c.name}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* 2. Brush Palette */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
+                <Palette className="w-3.5 h-3.5 text-slate-400" />
+                <span>لون الفرشاة / التلوين:</span>
+              </div>
+              <div className="flex items-center gap-3 bg-slate-950 p-2.5 rounded-2xl border border-slate-800 flex-wrap">
+                {PALETTE_COLORS.map(c => (
+                  <button
+                    key={c.hex}
+                    type="button"
+                    onClick={() => setBrushColor(c.hex)}
+                    style={{ backgroundColor: c.hex }}
+                    className={`w-8 h-8 rounded-full transition-transform cursor-pointer ${
+                      brushColor === c.hex ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-slate-900 shadow-md' : 'opacity-80 hover:opacity-100'
+                    }`}
+                    title={c.name}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* 3. Brush Size */}
+            <div className="space-y-2 bg-slate-950 p-3 rounded-2xl border border-slate-800">
+              <div className="flex items-center justify-between text-xs text-slate-300 font-semibold">
+                <span>سُمك الخط:</span>
+                <span className="font-mono text-amber-400 font-bold">{brushSize}px</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="10"
+                  max="45"
+                  value={brushSize}
+                  onChange={(e) => setBrushSize(Number(e.target.value))}
+                  className="flex-1 accent-amber-500 cursor-pointer"
+                />
+                <div
+                  className="rounded-full bg-amber-400 shrink-0"
+                  style={{ width: `${Math.min(26, Math.max(10, brushSize / 1.5))}px`, height: `${Math.min(26, Math.max(10, brushSize / 1.5))}px` }}
+                />
+              </div>
+            </div>
+
+            {/* 4. Opacity Slider */}
+            <div className="space-y-2 bg-slate-950 p-3 rounded-2xl border border-slate-800">
+              <div className="flex items-center justify-between text-xs text-slate-300 font-semibold">
+                <span>شفافية الرسمة:</span>
+                <span className="font-mono text-amber-400 font-bold">{Math.round(opacity * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.10"
+                max="0.60"
+                step="0.05"
+                value={opacity}
+                onChange={(e) => setOpacity(Number(e.target.value))}
+                className="w-full accent-amber-500 cursor-pointer"
+              />
+            </div>
+
+            {/* 5. Sensitivity if in Hand Tracking mode */}
+            {inputMode === 'ar_hand' && (
+              <div className="space-y-2 bg-slate-950 p-3 rounded-2xl border border-slate-800">
+                <div className="flex items-center gap-1.5 text-xs text-slate-300 font-semibold">
+                  <Sliders className="w-3.5 h-3.5 text-amber-400" />
+                  <span>حساسية الضم:</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['easy', 'normal', 'strict'] as PinchSensitivity[]).map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => {
+                        setSensitivity(s);
+                        handTrackingService.setSensitivity(s);
+                      }}
+                      className={`py-1.5 text-xs rounded-xl font-bold transition-colors cursor-pointer ${
+                        sensitivity === s ? 'bg-amber-500 text-slate-950 shadow' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      {s === 'easy' ? 'سهلة' : s === 'normal' ? 'متوسطة' : 'دقيقة'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Close Button to return to drawing */}
+            <button
+              type="button"
+              onClick={() => setIsToolsOpen(false)}
+              className="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg cursor-pointer transition-transform active:scale-95"
+            >
+              <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+              <span>إغلاق وبدء الرسم ✍️</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Hand Calibration Modal (Desktop Only) */}
+      {!isMobileDevice && (
+        <HandCalibrationModal
+          isOpen={isCalibrationOpen}
+          onClose={() => setIsCalibrationOpen(false)}
+          onSwitchToMouseMode={() => {
+            setInputMode('mouse_touch');
+            setIsCalibrationOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 };

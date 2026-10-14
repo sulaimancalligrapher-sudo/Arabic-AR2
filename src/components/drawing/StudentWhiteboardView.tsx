@@ -1598,47 +1598,45 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             </button>
           )}
 
-          {/* Desktop Only: Toggle Input Method (Hand Tracking vs Whiteboard Mouse) */}
-          {!isMobileDevice && (
-            <div className="flex items-center bg-slate-950 p-1 rounded-2xl border border-slate-700/80 shadow-inner">
-              <button
-                onClick={() => {
-                  if (inputMethod !== 'hand') {
-                    setInputMethod('hand');
-                    audioService.speakArabic('وضع تتبع حركة اليد أمام الكاميرا');
-                  }
-                }}
-                className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  inputMethod === 'hand'
-                    ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold ring-2 ring-amber-400/30'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-                title="النوع الأول: تتبع حركة اليد أمام الكاميرا ✋"
-              >
-                <Hand className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">تتبع اليد ✋</span>
-                <span className="sm:hidden">يد</span>
-              </button>
-              <button
-                onClick={() => {
-                  if (inputMethod !== 'touch_mouse') {
-                    setInputMethod('touch_mouse');
-                    audioService.speakArabic('السبورة البيضاء: يمكنك الآن الرسم باللمس أو بالفأرة');
-                  }
-                }}
-                className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  inputMethod === 'touch_mouse'
-                    ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold ring-2 ring-amber-400/30'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-                title="النوع الثاني: السبورة البيضاء (لمس / ماوس) 🖌️"
-              >
-                <PenTool className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">فأرة / لمس 🖱️</span>
-                <span className="sm:hidden">لمس</span>
-              </button>
-            </div>
-          )}
+          {/* Toggle Input Method (Hand Tracking vs Touch/Mouse): Desktop has labels, Mobile has icons only (Hand ✋ and Pen 🖊️) */}
+          <div className="flex items-center bg-slate-950 p-0.5 sm:p-1 rounded-2xl border border-slate-700/80 shadow-inner">
+            <button
+              type="button"
+              onClick={() => {
+                if (inputMethod !== 'hand') {
+                  setInputMethod('hand');
+                  audioService.speakArabic('وضع تتبع حركة اليد أمام الكاميرا');
+                }
+              }}
+              className={`p-1.5 sm:px-3 sm:py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                inputMethod === 'hand'
+                  ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold ring-2 ring-amber-400/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="تتبع حركة اليد أمام الكاميرا ✋"
+            >
+              <Hand className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">تتبع اليد ✋</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (inputMethod !== 'touch_mouse') {
+                  setInputMethod('touch_mouse');
+                  audioService.speakArabic('السبورة البيضاء: يمكنك الآن الرسم باللمس أو بالفأرة');
+                }
+              }}
+              className={`p-1.5 sm:px-3 sm:py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                inputMethod === 'touch_mouse'
+                  ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold ring-2 ring-amber-400/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="الرسم باللمس أو القلم 🖊️"
+            >
+              <PenTool className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">فأرة / لمس 🖱️</span>
+            </button>
+          </div>
 
           {/* Desktop Only: Toggle Video Feed (only in hand mode) */}
           {!isMobileDevice && inputMethod === 'hand' && (
