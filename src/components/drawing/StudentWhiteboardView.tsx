@@ -28,7 +28,9 @@ import {
   ShieldCheck,
   Hash,
   PenTool,
-  LogOut
+  LogOut,
+  Award,
+  AlertCircle
 } from 'lucide-react';
 
 interface StudentWhiteboardViewProps {
@@ -144,6 +146,35 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
   const [lessonEndedByTeacher, setLessonEndedByTeacher] = useState(false);
   const isPointerDownRef = useRef(false);
 
+  // Arabic Letter Steps Guidance (نظام خطوات رسم الحروف وترقيمها)
+  const steps = currentDrawing.steps || [];
+  const hasStepsGuide = steps.length > 0 && currentDrawing.enableStepsGuide !== false;
+  const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
+  const currentStepIndexRef = useRef<number>(0);
+  const [completedStepIds, setCompletedStepIds] = useState<Set<string>>(new Set());
+  const completedStepIdsRef = useRef<Set<string>>(new Set());
+  const isCurrentStepStartedRef = useRef<boolean>(false);
+  const [stepInvalidStarts, setStepInvalidStarts] = useState<number>(0);
+  const stepInvalidStartsRef = useRef<number>(0);
+  const [stepAlert, setStepAlert] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
+  const lastInvalidSoundTimeRef = useRef<number>(0);
+  const [evaluationResult, setEvaluationResult] = useState<{
+    isPassed: boolean;
+    allStepsCompleted: boolean;
+    stepsAccuracy: number;
+    compositeScore: number;
+    earnedScore: number;
+    completedCount: number;
+    totalSteps: number;
+  } | null>(null);
+
+  const showStepAlert = (message: string, type: 'error' | 'success' | 'info' = 'info') => {
+    setStepAlert({ message, type });
+    setTimeout(() => {
+      setStepAlert((curr) => (curr?.message === message ? null : curr));
+    }, 3500);
+  };
+
   // In-canvas button tracking
   const [isHoveringButton, setIsHoveringButton] = useState(false);
   const isHoveringButtonRef = useRef(false);
@@ -212,8 +243,10 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
   const updateStageDimensions = useCallback(() => {
     if (!stageContainerRef.current) return;
     const container = stageContainerRef.current;
+    const windowH = typeof window !== 'undefined' ? window.innerHeight : 800;
+    const maxViewportH = Math.max(220, windowH - (isMobileDevice ? 100 : 130));
     const availW = container.clientWidth;
-    const availH = container.clientHeight;
+    const availH = Math.min(container.clientHeight > 0 ? container.clientHeight : maxViewportH, maxViewportH);
 
     if (availW <= 0 || availH <= 0) return;
 
@@ -221,9 +254,9 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     if (inputMethodRef.current === 'touch_mouse') {
       if (isMobileDevice) {
         // On mobile and tablet: Whiteboard takes full available height and width (full-screen drawing canvas!)
-        setStageDimensions({
-          width: availW,
-          height: availH
+        setStageDimensions(prev => {
+          if (Math.abs(prev.width - availW) < 2 && Math.abs(prev.height - availH) < 2) return prev;
+          return { width: availW, height: availH };
         });
       } else {
         // On desktop/PC: Fill height and maintain natural wide canvas (up to 16:9 or max available)
@@ -240,9 +273,9 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
           fitH = Math.round(availW / targetAspect);
         }
 
-        setStageDimensions({
-          width: fitW,
-          height: fitH
+        setStageDimensions(prev => {
+          if (Math.abs(prev.width - fitW) < 2 && Math.abs(prev.height - fitH) < 2) return prev;
+          return { width: fitW, height: fitH };
         });
       }
       return;
@@ -274,9 +307,9 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       fitH = Math.round(availW / cameraAspect);
     }
 
-    setStageDimensions({
-      width: fitW,
-      height: fitH
+    setStageDimensions(prev => {
+      if (Math.abs(prev.width - fitW) < 2 && Math.abs(prev.height - fitH) < 2) return prev;
+      return { width: fitW, height: fitH };
     });
   }, [isMobileDevice, videoDims.aspect]);
 
@@ -559,6 +592,17 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     setIsFinished(false);
     isFinishedRef.current = false;
     handTrackingService.resetLatch();
+
+    // Reset steps state
+    setCurrentStepIndex(0);
+    currentStepIndexRef.current = 0;
+    setCompletedStepIds(new Set());
+    completedStepIdsRef.current = new Set();
+    isCurrentStepStartedRef.current = false;
+    setStepInvalidStarts(0);
+    stepInvalidStartsRef.current = 0;
+    setStepAlert(null);
+    setEvaluationResult(null);
   };
 
   const startDrawingSession = () => {
@@ -570,7 +614,9 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     setButtonFeedback(true);
     setTimeout(() => setButtonFeedback(false), 500);
     audioService.playChime();
-    if (inputMethodRef.current === 'hand') {
+    if (hasStepsGuide && steps.length > 0) {
+      audioService.speakArabic('ابدأ من النقطة الخضراء المتوهجة للخطوة الأولى');
+    } else if (inputMethodRef.current === 'hand') {
       audioService.speakArabic('بدأت جلسة الرسم! ضم أصابعك الثلاثة وابدأ التلوين ✍️');
     } else {
       audioService.speakArabic('بدأت جلسة الرسم! ارسم بإصبعك على السبورة الآن ✍️');
@@ -583,17 +629,60 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     setIsFinished(true);
     setIsSessionActive(false);
     isSessionActiveRef.current = false;
-    audioService.playSuccessSound();
-
-    try {
-      confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
-    } catch {
-      // Ignore
-    }
 
     const duration = Math.max(5, Math.round((Date.now() - startTimeRef.current) / 1000));
-    const finalAcc = latestAccuracyRef.current || accuracy || 80;
-    const earnedScore = Math.round((currentDrawing.points * finalAcc) / 100);
+    const finalAcc = latestAccuracyRef.current || accuracy;
+
+    // Strict Dual Measurement: Path Coverage Accuracy + Step Sequence Adherence
+    const totalStepsCount = steps.length;
+    const completedCount = completedStepIdsRef.current.size;
+    const allStepsCompleted = !hasStepsGuide || (totalStepsCount > 0 && completedCount === totalStepsCount);
+
+    let stepsAccuracy = 100;
+    if (hasStepsGuide && totalStepsCount > 0) {
+      if (completedCount === 0) {
+        stepsAccuracy = 0;
+      } else {
+        const rawStepScore = (completedCount / totalStepsCount) * 100;
+        const penalty = Math.min(60, stepInvalidStartsRef.current * 15);
+        stepsAccuracy = Math.max(0, Math.round(rawStepScore - penalty));
+      }
+    }
+
+    let compositeScore: number;
+    if (hasStepsGuide && totalStepsCount > 0) {
+      if (!allStepsCompleted) {
+        // Did not complete all steps! Strict cap to under passing threshold (max 35%)
+        compositeScore = Math.min(35, Math.round(finalAcc * 0.3 + stepsAccuracy * 0.7));
+      } else {
+        compositeScore = Math.round(finalAcc * 0.5 + stepsAccuracy * 0.5);
+      }
+    } else {
+      compositeScore = finalAcc;
+    }
+
+    const minPassAccuracy = currentDrawing.targetAccuracy || 60;
+    const isPassed = allStepsCompleted && compositeScore >= minPassAccuracy;
+    const earnedScore = Math.round((currentDrawing.points * compositeScore) / 100);
+
+    setEvaluationResult({
+      isPassed,
+      allStepsCompleted,
+      stepsAccuracy,
+      compositeScore,
+      earnedScore,
+      completedCount,
+      totalSteps: totalStepsCount
+    });
+
+    if (isPassed) {
+      audioService.playSuccessSound();
+      try {
+        confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+      } catch {}
+    } else {
+      audioService.playStepWarningSound();
+    }
 
     const resultRecord: DrawingResult = {
       id: 'board_' + Date.now(),
@@ -604,6 +693,8 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       drawingTitle: currentDrawing.title,
       mode: currentDrawing.mode,
       accuracy: finalAcc,
+      stepsAccuracy: hasStepsGuide ? stepsAccuracy : undefined,
+      compositeScore: hasStepsGuide ? compositeScore : finalAcc,
       score: earnedScore,
       attempts: 1,
       timestamp: new Date().toISOString(),
@@ -613,7 +704,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     // Save and send to Teacher & Google Sheets
     googleSheetsService.enqueueDrawingResult(resultRecord);
     whiteboardSyncService.reportFinished({
-      accuracy: finalAcc,
+      accuracy: compositeScore,
       score: earnedScore,
       drawingId: currentDrawing.id,
       drawingTitle: currentDrawing.title,
@@ -783,6 +874,39 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     const currentAccuracy = Math.min(100, Math.round(covRatio * 0.7 + steadiness * 0.3));
     latestAccuracyRef.current = currentAccuracy;
 
+    // Check if end target reached for active step
+    if (hasStepsGuide && steps[currentStepIndexRef.current] && isCurrentStepStartedRef.current) {
+      const activeStep = steps[currentStepIndexRef.current];
+      const targetEndX = activeStep.endPoint.x * width;
+      const targetEndY = activeStep.endPoint.y * height;
+      const endRadius = Math.max(35, Math.min(width, height) * 0.08);
+      const distEnd = Math.hypot(pixelX - targetEndX, pixelY - targetEndY);
+
+      if (distEnd <= endRadius) {
+        completedStepIdsRef.current.add(activeStep.id);
+        setCompletedStepIds(new Set(completedStepIdsRef.current));
+        audioService.playStepSuccessSound();
+        try {
+          confetti({
+            particleCount: 25,
+            spread: 45,
+            origin: { x: pixelX / width, y: pixelY / height }
+          });
+        } catch {}
+
+        if (currentStepIndexRef.current + 1 < steps.length) {
+          const nextIdx = currentStepIndexRef.current + 1;
+          currentStepIndexRef.current = nextIdx;
+          setCurrentStepIndex(nextIdx);
+          isCurrentStepStartedRef.current = false;
+          lastDrawPosRef.current = null;
+          showStepAlert(`✨ ممتاز! أكملت الخطوة ${activeStep.stepNumber}، انتقل للخطوة ${nextIdx + 1} 🟢`, 'success');
+        } else {
+          showStepAlert('🎉 رائع جداً ومتقن! أكملت جميع خطوات رسم الحرف بالتسلسل الصحيح!', 'success');
+        }
+      }
+    }
+
     // Throttle React state re-renders to 10 FPS to maintain 120 FPS buttery-smooth drawing on mobile/tablets
     const now = Date.now();
     if (now - lastAccuracyUpdateRef.current > 100) {
@@ -802,7 +926,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
         drawingTitle: currentDrawing.title
       });
     }
-  }, [brushColor, brushSize, currentDrawing.id, currentDrawing.title, currentDrawing.tolerance]);
+  }, [brushColor, brushSize, currentDrawing.id, currentDrawing.title, currentDrawing.tolerance, hasStepsGuide, steps]);
 
   // Exact subpixel coordinate mapping for touchscreen, stylus & mouse
   // Corrects for CSS object-contain letterboxing/pillarboxing so the pen is 100% directly beneath the finger!
@@ -893,16 +1017,57 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.cancelable) e.preventDefault();
     if (inputMethodRef.current !== 'touch_mouse') return;
-    if (!isSessionActiveRef.current || isFinishedRef.current || !userDrawCanvasRef.current) return;
-    
-    isPointerDownRef.current = true;
-    setIsPenDown(true);
+    if (!isSessionActiveRef.current || isFinishedRef.current || !userDrawCanvasRef.current || !analysisRef.current) return;
+
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {}
 
     const coords = getCanvasCoordinates(e.clientX, e.clientY);
-    if (coords) {
+    if (!coords) return;
+
+    if (hasStepsGuide && steps[currentStepIndexRef.current]) {
+      const activeStep = steps[currentStepIndexRef.current];
+      const { width, height } = analysisRef.current;
+      const targetStartX = activeStep.startPoint.x * width;
+      const targetStartY = activeStep.startPoint.y * height;
+      const targetEndX = activeStep.endPoint.x * width;
+      const targetEndY = activeStep.endPoint.y * height;
+      const startRadius = Math.max(35, Math.min(width, height) * 0.08);
+
+      const distStart = Math.hypot(coords.px - targetStartX, coords.py - targetStartY);
+      const distEnd = Math.hypot(coords.px - targetEndX, coords.py - targetEndY);
+
+      if (distStart <= startRadius) {
+        // Valid initiation!
+        isPointerDownRef.current = true;
+        setIsPenDown(true);
+        isCurrentStepStartedRef.current = true;
+        audioService.playPopSound();
+        showStepAlert(`🟢 ممتاز! بدأت الخطوة ${activeStep.stepNumber}، تتبع مسار الحرف لنقطة النهاية 🎯`, 'info');
+        lastDrawPosRef.current = { x: targetStartX, y: targetStartY };
+        processDrawPoint(targetStartX, targetStartY);
+      } else {
+        // INVALID: Do not start stroke!
+        isPointerDownRef.current = false;
+        setIsPenDown(false);
+        isCurrentStepStartedRef.current = false;
+        lastDrawPosRef.current = null;
+        stepInvalidStartsRef.current++;
+        setStepInvalidStarts(stepInvalidStartsRef.current);
+        audioService.playStepWarningSound();
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          try { navigator.vibrate(60); } catch {}
+        }
+        if (distEnd <= startRadius * 1.5) {
+          showStepAlert(`⚠️ خطأ! هذه نقطة النهاية 🔴. يجب أن تبدأ من نقطة البداية الخضراء 🟢 للخطوة ${activeStep.stepNumber}!`, 'error');
+        } else {
+          showStepAlert(`⚠️ خطأ: ابدأ بالنقر داخل نقطة البداية الخضراء 🟢 للخطوة ${activeStep.stepNumber} أولاً!`, 'error');
+        }
+      }
+    } else {
+      isPointerDownRef.current = true;
+      setIsPenDown(true);
       processDrawPoint(coords.px, coords.py);
     }
   };
@@ -911,6 +1076,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     if (e.cancelable) e.preventDefault();
     if (inputMethodRef.current !== 'touch_mouse') return;
     if (!isPointerDownRef.current || !isSessionActiveRef.current || isFinishedRef.current || !userDrawCanvasRef.current) return;
+    if (hasStepsGuide && !isCurrentStepStartedRef.current) return; // Strict: No drawing outside valid started step!
 
     const coords = getCanvasCoordinates(e.clientX, e.clientY);
     if (coords) {
@@ -929,6 +1095,14 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
         e.currentTarget.releasePointerCapture(e.pointerId);
       }
     } catch {}
+
+    if (hasStepsGuide && steps[currentStepIndexRef.current]) {
+      const activeStep = steps[currentStepIndexRef.current];
+      if (isCurrentStepStartedRef.current && !completedStepIdsRef.current.has(activeStep.id)) {
+        isCurrentStepStartedRef.current = false;
+        showStepAlert(`⚠️ رفعت يدك قبل الوصول لنقطة النهاية 🎯! أعد رسم الخطوة ${activeStep.stepNumber} من نقطة البداية 🟢`, 'info');
+      }
+    }
     flushAccuracyUpdate();
   };
 
@@ -941,13 +1115,52 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
     const onTouchStartNative = (e: TouchEvent) => {
       if (e.cancelable) e.preventDefault();
       if (inputMethodRef.current !== 'touch_mouse') return;
-      if (!isSessionActiveRef.current || isFinishedRef.current || !canvas) return;
+      if (!isSessionActiveRef.current || isFinishedRef.current || !canvas || !analysisRef.current) return;
       if (e.touches[0]) {
-        isPointerDownRef.current = true;
-        setIsPenDown(true);
         const touch = e.touches[0];
         const coords = getCanvasCoordinates(touch.clientX, touch.clientY);
-        if (coords) {
+        if (!coords) return;
+
+        if (hasStepsGuide && steps[currentStepIndexRef.current]) {
+          const activeStep = steps[currentStepIndexRef.current];
+          const { width, height } = analysisRef.current;
+          const targetStartX = activeStep.startPoint.x * width;
+          const targetStartY = activeStep.startPoint.y * height;
+          const targetEndX = activeStep.endPoint.x * width;
+          const targetEndY = activeStep.endPoint.y * height;
+          const startRadius = Math.max(35, Math.min(width, height) * 0.08);
+
+          const distStart = Math.hypot(coords.px - targetStartX, coords.py - targetStartY);
+          const distEnd = Math.hypot(coords.px - targetEndX, coords.py - targetEndY);
+
+          if (distStart <= startRadius) {
+            isPointerDownRef.current = true;
+            setIsPenDown(true);
+            isCurrentStepStartedRef.current = true;
+            audioService.playPopSound();
+            showStepAlert(`🟢 ممتاز! بدأت الخطوة ${activeStep.stepNumber}، تتبع مسار الحرف لنقطة النهاية 🎯`, 'info');
+            lastDrawPosRef.current = { x: targetStartX, y: targetStartY };
+            processDrawPoint(targetStartX, targetStartY);
+          } else {
+            isPointerDownRef.current = false;
+            setIsPenDown(false);
+            isCurrentStepStartedRef.current = false;
+            lastDrawPosRef.current = null;
+            stepInvalidStartsRef.current++;
+            setStepInvalidStarts(stepInvalidStartsRef.current);
+            audioService.playStepWarningSound();
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+              try { navigator.vibrate(60); } catch {}
+            }
+            if (distEnd <= startRadius * 1.5) {
+              showStepAlert(`⚠️ خطأ! هذه نقطة النهاية 🔴. يجب أن تبدأ من نقطة البداية الخضراء 🟢 للخطوة ${activeStep.stepNumber}!`, 'error');
+            } else {
+              showStepAlert(`⚠️ خطأ: المس داخل نقطة البداية الخضراء 🟢 للخطوة ${activeStep.stepNumber} أولاً!`, 'error');
+            }
+          }
+        } else {
+          isPointerDownRef.current = true;
+          setIsPenDown(true);
           processDrawPoint(coords.px, coords.py);
         }
       }
@@ -957,6 +1170,8 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       if (e.cancelable) e.preventDefault();
       if (inputMethodRef.current !== 'touch_mouse') return;
       if (!isPointerDownRef.current || !isSessionActiveRef.current || isFinishedRef.current || !canvas) return;
+      if (hasStepsGuide && !isCurrentStepStartedRef.current) return; // Strict: No drawing outside valid started step!
+
       if (e.touches[0]) {
         const touch = e.touches[0];
         const coords = getCanvasCoordinates(touch.clientX, touch.clientY);
@@ -972,6 +1187,13 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       isPointerDownRef.current = false;
       setIsPenDown(false);
       lastDrawPosRef.current = null;
+      if (hasStepsGuide && steps[currentStepIndexRef.current]) {
+        const activeStep = steps[currentStepIndexRef.current];
+        if (isCurrentStepStartedRef.current && !completedStepIdsRef.current.has(activeStep.id)) {
+          isCurrentStepStartedRef.current = false;
+          showStepAlert(`⚠️ رفعت إصبعك قبل الوصول لنقطة النهاية 🎯! أعد رسم الخطوة ${activeStep.stepNumber} من نقطة البداية 🟢`, 'info');
+        }
+      }
       flushAccuracyUpdate();
     };
 
@@ -1383,6 +1605,13 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
 
     if (!isDrawing || !isSessionActiveRef.current) {
       lastDrawPosRef.current = null;
+      if (hasStepsGuide && steps[currentStepIndexRef.current]) {
+        const activeStep = steps[currentStepIndexRef.current];
+        if (isCurrentStepStartedRef.current && !completedStepIdsRef.current.has(activeStep.id)) {
+          isCurrentStepStartedRef.current = false;
+          showStepAlert(`⚠️ فتحت أصابعك قبل الوصول لنقطة النهاية 🎯! أعد رسم الخطوة ${activeStep.stepNumber} من نقطة البداية 🟢`, 'info');
+        }
+      }
       return;
     }
 
@@ -1393,19 +1622,54 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
         const px = activePoint.x * userDrawCanvasRef.current.width;
         const py = activePoint.y * userDrawCanvasRef.current.height;
 
-        // Prevent drawing repeatedly on the exact same pixel if hand hasn't moved
-        if (lastDrawPosRef.current) {
-          const dx = px - lastDrawPosRef.current.x;
-          const dy = py - lastDrawPosRef.current.y;
-          if (dx * dx + dy * dy < 4) { // Ignore micro-jitters under 2px
+        // If step is not started yet, check if activePoint touches the start beacon
+        if (hasStepsGuide && steps[currentStepIndexRef.current] && !isCurrentStepStartedRef.current) {
+          const activeStep = steps[currentStepIndexRef.current];
+          const targetStartX = activeStep.startPoint.x * userDrawCanvasRef.current.width;
+          const targetStartY = activeStep.startPoint.y * userDrawCanvasRef.current.height;
+          const targetEndX = activeStep.endPoint.x * userDrawCanvasRef.current.width;
+          const targetEndY = activeStep.endPoint.y * userDrawCanvasRef.current.height;
+          const startRadius = Math.max(35, Math.min(userDrawCanvasRef.current.width, userDrawCanvasRef.current.height) * 0.08);
+
+          const distStart = Math.hypot(px - targetStartX, py - targetStartY);
+          const distEnd = Math.hypot(px - targetEndX, py - targetEndY);
+
+          if (distStart <= startRadius) {
+            isCurrentStepStartedRef.current = true;
+            audioService.playPopSound();
+            showStepAlert(`🟢 ممتاز! بدأت الخطوة ${activeStep.stepNumber}، تتبع مسار الحرف لنقطة النهاية 🎯`, 'info');
+            lastDrawPosRef.current = { x: targetStartX, y: targetStartY };
+            processDrawPoint(targetStartX, targetStartY);
+          } else {
+            const now = Date.now();
+            if (now - lastInvalidSoundTimeRef.current > 700) {
+              lastInvalidSoundTimeRef.current = now;
+              stepInvalidStartsRef.current++;
+              setStepInvalidStarts(stepInvalidStartsRef.current);
+              audioService.playStepWarningSound();
+              if (distEnd <= startRadius * 1.5) {
+                showStepAlert(`⚠️ خطأ! هذه نقطة النهاية 🔴. يجب أن تبدأ من نقطة البداية الخضراء 🟢 للخطوة ${activeStep.stepNumber}!`, 'error');
+              } else {
+                showStepAlert(`⚠️ خطأ: ابدأ بالضم داخل نقطة البداية الخضراء 🟢 للخطوة ${activeStep.stepNumber}!`, 'error');
+              }
+            }
             return;
           }
-        }
+        } else {
+          // Prevent drawing repeatedly on the exact same pixel if hand hasn't moved
+          if (lastDrawPosRef.current) {
+            const dx = px - lastDrawPosRef.current.x;
+            const dy = py - lastDrawPosRef.current.y;
+            if (dx * dx + dy * dy < 4) { // Ignore micro-jitters under 2px
+              return;
+            }
+          }
 
-        processDrawPoint(px, py);
+          processDrawPoint(px, py);
+        }
       }
     }
-  }, [brushColor, handleToggleButton, processDrawPoint]);
+  }, [brushColor, handleToggleButton, processDrawPoint, hasStepsGuide, steps]);
   handleHandUpdateRef.current = handleHandUpdate;
 
   // Fullscreen toggle
@@ -1773,6 +2037,100 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             }`}
           />
 
+          {/* Layer 5: Interactive Arabic Letter Steps & Calligraphy Guidance Overlay */}
+          {hasStepsGuide && steps.length > 0 && (
+            <div className="absolute inset-0 pointer-events-none z-35 overflow-hidden">
+              {/* Note: Connecting straight line removed as Arabic calligraphy has curved paths. Only start and end beacons remain. */}
+
+              {/* Render Completed Step Badges (Muted green checkmarks) */}
+              {steps.map((st, idx) => {
+                if (idx >= currentStepIndex) return null;
+                return (
+                  <div
+                    key={'comp_' + st.id}
+                    style={{
+                      left: `${st.startPoint.x * 100}%`,
+                      top: `${st.startPoint.y * 100}%`,
+                      transform: 'translate(-50%, -50%)'
+                    }}
+                    className="absolute flex items-center justify-center pointer-events-none"
+                  >
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/80 border border-white text-slate-950 font-bold text-[10px] flex items-center justify-center shadow">
+                      ✓
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Render Active Step Start Point 🟢 (Glowing Pulsing Beacon) */}
+              {steps[currentStepIndex] && (
+                <div
+                  style={{
+                    left: `${steps[currentStepIndex].startPoint.x * 100}%`,
+                    top: `${steps[currentStepIndex].startPoint.y * 100}%`,
+                    transform: 'translate(-50%, -50%)'
+                  }}
+                  className="absolute flex items-center justify-center pointer-events-none transition-all duration-300"
+                >
+                  <div className="relative flex items-center justify-center">
+                    {/* Outer animated ripple */}
+                    <span className="absolute w-12 h-12 rounded-full bg-emerald-400/50 animate-ping" />
+                    <span className="absolute w-16 h-16 rounded-full bg-emerald-500/20 animate-pulse" />
+                    {/* Inner core badge */}
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-600 to-emerald-400 border-2 border-white shadow-xl text-slate-950 font-black text-xs flex items-center justify-center ring-4 ring-emerald-400/40">
+                      {steps[currentStepIndex].stepNumber}
+                    </div>
+                    <span className="absolute -bottom-5 bg-slate-950/90 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/40 whitespace-nowrap shadow-md font-bold">
+                      ابدأ هنا 🟢
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Render Active Step End Point 🎯 (Target Ring) */}
+              {steps[currentStepIndex] && (
+                <div
+                  style={{
+                    left: `${steps[currentStepIndex].endPoint.x * 100}%`,
+                    top: `${steps[currentStepIndex].endPoint.y * 100}%`,
+                    transform: 'translate(-50%, -50%)'
+                  }}
+                  className="absolute flex items-center justify-center pointer-events-none transition-all duration-300"
+                >
+                  <div className="relative flex items-center justify-center">
+                    <span className="absolute w-10 h-10 rounded-full border border-rose-400/60 animate-ping" />
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-rose-600 to-rose-400 border-2 border-white shadow-xl text-white font-black text-[11px] flex items-center justify-center ring-4 ring-rose-400/30">
+                      🎯
+                    </div>
+                    <span className="absolute -bottom-5 bg-slate-950/90 text-rose-300 text-[10px] px-2 py-0.5 rounded-full border border-rose-500/40 whitespace-nowrap shadow-md font-bold">
+                      النهاية 🔴
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Floating Live Step Alert Banner */}
+          {stepAlert && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-45 animate-in fade-in slide-in-from-top-3 duration-200 pointer-events-none">
+              <div className={`px-4 py-2 rounded-2xl border shadow-2xl backdrop-blur-md flex items-center gap-2 text-xs sm:text-sm font-bold ${
+                stepAlert.type === 'error'
+                  ? 'bg-rose-950/90 border-rose-500/80 text-rose-200'
+                  : stepAlert.type === 'success'
+                  ? 'bg-emerald-950/90 border-emerald-500/80 text-emerald-200'
+                  : 'bg-amber-950/90 border-amber-500/80 text-amber-200'
+              }`}>
+                {stepAlert.type === 'error' ? (
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                ) : (
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                )}
+                <span>{stepAlert.message}</span>
+              </div>
+            </div>
+          )}
+
           {/* Interactive In-Canvas Button (Start / Finish Session) - PC & Desktop Only */}
           {!isMobileDevice && flowState === 'drawing' && (
             <div className="absolute top-3 sm:top-4 right-3 sm:right-4 z-50 flex flex-col items-end gap-1.5 pointer-events-auto">
@@ -1974,38 +2332,103 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             </div>
           )}
 
-          {/* Congratulations Modal Overlay */}
+          {/* Dynamic Evaluation Modal Overlay (Strict Pass / Fail + Dual Measurement) */}
           {isFinished && (
             <div className="absolute inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-fade-in">
-              <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center mb-4 shadow-lg shadow-emerald-500/30 animate-bounce">
-                <Sparkles className="w-10 h-10 text-emerald-400" />
-              </div>
-              <h2 className="text-2xl sm:text-3xl font-black text-amber-400 mb-2">
-                أحسنت يا {studentName}! 🌟
-              </h2>
-              <p className="text-slate-300 text-sm max-w-sm mb-4">
-                تم إكمال رسمة «{currentDrawing.title}» بنجاح وتسجيل درجتك باسمك (#{studentNumber}) للمعلم!
-              </p>
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center gap-6 mb-6">
-                <div>
-                  <div className="text-xs text-slate-400">نسبة الإتقان</div>
-                  <div className="text-2xl font-black font-mono text-emerald-400">{accuracy}%</div>
+              <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl p-6 text-center shadow-2xl space-y-4">
+                {/* Header Icon */}
+                <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mx-auto shadow-inner ${
+                  evaluationResult?.isPassed
+                    ? 'bg-amber-500/20 text-amber-400 ring-2 ring-amber-400/40'
+                    : 'bg-rose-500/20 text-rose-400 ring-2 ring-rose-400/40'
+                }`}>
+                  {evaluationResult?.isPassed ? (
+                    <Award className="w-8 h-8" />
+                  ) : (
+                    <AlertCircle className="w-8 h-8 text-rose-400" />
+                  )}
                 </div>
-                <div className="w-px h-10 bg-slate-800" />
+
                 <div>
-                  <div className="text-xs text-slate-400">النقاط المكتسبة</div>
-                  <div className="text-2xl font-black font-mono text-amber-400">
-                    +{Math.round((currentDrawing.points * accuracy) / 100)}
+                  <h3 className="text-xl sm:text-2xl font-extrabold text-white font-serif">
+                    {evaluationResult?.isPassed
+                      ? `🎉 إتقان ورسم رائع يا ${studentName}!`
+                      : '⚠️ لم يتم اجتياز التدريب: خطأ في الخطوات'}
+                  </h3>
+                  <p className="text-xs text-slate-300 mt-1">
+                    {evaluationResult?.isPassed
+                      ? `تم إكمال رسمة «${currentDrawing.title}» بنجاح وتسجيل درجتك باسمك (${studentName}) للمعلم!`
+                      : 'يجب اتباع جميع خطوات رسم الحرف بالتسلسل والبدء دائماً من النقطة الخضراء 🟢 والانتهاء عند النقطة الحمراء 🎯.'}
+                  </p>
+                </div>
+
+                {/* Score Badges: Dual Measurement when steps exist */}
+                {hasStepsGuide && steps.length > 0 ? (
+                  <div className="space-y-2 py-1">
+                    <div className="grid grid-cols-2 gap-2 text-right">
+                      <div className={`p-3 rounded-2xl border ${
+                        evaluationResult?.allStepsCompleted ? 'bg-slate-800/80 border-emerald-500/40' : 'bg-rose-950/30 border-rose-500/40'
+                      }`}>
+                        <div className={`text-[10px] font-bold ${
+                          evaluationResult?.allStepsCompleted ? 'text-emerald-400' : 'text-rose-400'
+                        }`}>
+                          {evaluationResult?.allStepsCompleted ? '🟢 دقة الخطوات والتسلسل' : '🔴 نقص في الخطوات'}
+                        </div>
+                        <div className="text-xl font-extrabold font-mono text-white mt-0.5">
+                          {evaluationResult?.stepsAccuracy ?? 0}%
+                        </div>
+                        <div className="text-[9px] text-slate-400 mt-0.5">
+                          أكملت {evaluationResult?.completedCount ?? 0} من {steps.length} خطوات
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700">
+                        <div className="text-[10px] text-amber-400 font-bold">✍️ دقة مسار الخط</div>
+                        <div className="text-xl font-extrabold font-mono text-white mt-0.5">{accuracy}%</div>
+                        <div className="text-[9px] text-slate-400 mt-0.5">المطلوب {currentDrawing.targetAccuracy}%</div>
+                      </div>
+                    </div>
+
+                    {/* Combined Final Score */}
+                    <div className="p-2.5 rounded-2xl bg-slate-950 border border-amber-500/40 flex items-center justify-between px-4">
+                      <span className="text-xs font-bold text-amber-300">التقييم المركب النهائي:</span>
+                      <span className={`text-lg font-black font-mono ${
+                        evaluationResult?.isPassed ? 'text-emerald-400' : 'text-rose-400'
+                      }`}>
+                        {evaluationResult?.compositeScore ?? accuracy}%
+                      </span>
+                    </div>
                   </div>
+                ) : (
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center gap-6 mb-2">
+                    <div>
+                      <div className="text-xs text-slate-400">نسبة الإتقان</div>
+                      <div className="text-2xl font-black font-mono text-emerald-400">{accuracy}%</div>
+                    </div>
+                    <div className="w-px h-10 bg-slate-800" />
+                    <div>
+                      <div className="text-xs text-slate-400">النقاط المكتسبة</div>
+                      <div className="text-2xl font-black font-mono text-amber-400">
+                        +{Math.round((currentDrawing.points * accuracy) / 100)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2">
+                  <button
+                    onClick={clearCanvas}
+                    className={`w-full py-3 rounded-2xl font-bold text-sm shadow-lg flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer ${
+                      evaluationResult?.isPassed
+                        ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/25'
+                        : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/25'
+                    }`}
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>{evaluationResult?.isPassed ? 'التدرب مرة أخرى 🎨' : 'إعادة المحاولة من البداية 🔄'}</span>
+                  </button>
                 </div>
               </div>
-              <button
-                onClick={clearCanvas}
-                className="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold flex items-center gap-2 shadow-lg transition-transform active:scale-95 cursor-pointer"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>إعادة المحاولة من جديد</span>
-              </button>
             </div>
           )}
         </div>

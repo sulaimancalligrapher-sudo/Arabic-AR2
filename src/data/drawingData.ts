@@ -136,7 +136,26 @@ export const PRESET_DRAWINGS: DrawingItem[] = [
     tolerance: 'normal',
     targetAccuracy: 75,
     points: 100,
-    arabicAudioText: 'أَلِف'
+    arabicAudioText: 'أَلِف',
+    enableStepsGuide: true,
+    steps: [
+      {
+        id: 'alif_s1',
+        stepNumber: 1,
+        label: 'الهمزة: ابدأ بتقوس الهمزة وانتهِ بالقاعدة',
+        startPoint: { x: 0.51, y: 0.19 },
+        endPoint: { x: 0.42, y: 0.30 },
+        directionDesc: 'من اليمين للأعلى ثم انزلق لليسار'
+      },
+      {
+        id: 'alif_s2',
+        stepNumber: 2,
+        label: 'عصا الألف: ارسم عمود الألف من الأعلى لأسفل مستقيماً',
+        startPoint: { x: 0.50, y: 0.36 },
+        endPoint: { x: 0.50, y: 0.84 },
+        directionDesc: 'من أعلى لأسفل باتجاه خط السطر'
+      }
+    ]
   },
   {
     id: 'draw_baa',
@@ -150,7 +169,26 @@ export const PRESET_DRAWINGS: DrawingItem[] = [
     tolerance: 'normal',
     targetAccuracy: 75,
     points: 100,
-    arabicAudioText: 'بَاء'
+    arabicAudioText: 'بَاء',
+    enableStepsGuide: true,
+    steps: [
+      {
+        id: 'baa_s1',
+        stepNumber: 1,
+        label: 'صحن الباء: ابدأ من طرف السن اليمين وانحدر لليسار',
+        startPoint: { x: 0.76, y: 0.50 },
+        endPoint: { x: 0.24, y: 0.50 },
+        directionDesc: 'من اليمين عبر قاع الصحن ثم اصعد لليسار'
+      },
+      {
+        id: 'baa_s2',
+        stepNumber: 2,
+        label: 'نقطة الباء: ضع نقطة الحرف أسفل الوسط',
+        startPoint: { x: 0.50, y: 0.825 },
+        endPoint: { x: 0.50, y: 0.825 },
+        directionDesc: 'نقطة واحدة مركزة أسفل صحن الباء'
+      }
+    ]
   },
   {
     id: 'draw_jeem',
@@ -164,7 +202,34 @@ export const PRESET_DRAWINGS: DrawingItem[] = [
     tolerance: 'normal',
     targetAccuracy: 70,
     points: 120,
-    arabicAudioText: 'جِيم'
+    arabicAudioText: 'جِيم',
+    enableStepsGuide: true,
+    steps: [
+      {
+        id: 'jeem_s1',
+        stepNumber: 1,
+        label: 'رأس الجيم: حاجب الحرف من اليسار للأعلى ثم لليمين',
+        startPoint: { x: 0.34, y: 0.30 },
+        endPoint: { x: 0.66, y: 0.30 },
+        directionDesc: 'خط أفقي متموج متصل'
+      },
+      {
+        id: 'jeem_s2',
+        stepNumber: 2,
+        label: 'بطن الجيم: ارسم القوس الدائري الواسع للأسفل',
+        startPoint: { x: 0.66, y: 0.30 },
+        endPoint: { x: 0.26, y: 0.66 },
+        directionDesc: 'دوران دائري نصف قطري واسع'
+      },
+      {
+        id: 'jeem_s3',
+        stepNumber: 3,
+        label: 'نقطة الجيم: ضع نقطة في جوف بطن الحرف',
+        startPoint: { x: 0.46, y: 0.66 },
+        endPoint: { x: 0.46, y: 0.66 },
+        directionDesc: 'نقطة في منتصف بطن الجيم'
+      }
+    ]
   },
   {
     id: 'draw_dal',
@@ -178,7 +243,26 @@ export const PRESET_DRAWINGS: DrawingItem[] = [
     tolerance: 'normal',
     targetAccuracy: 80,
     points: 90,
-    arabicAudioText: 'دَال'
+    arabicAudioText: 'دَال',
+    enableStepsGuide: true,
+    steps: [
+      {
+        id: 'dal_s1',
+        stepNumber: 1,
+        label: 'الانحدار المائل للدال من أعلى لأسفل السطر',
+        startPoint: { x: 0.62, y: 0.29 },
+        endPoint: { x: 0.33, y: 0.64 },
+        directionDesc: 'انحناء مائل ناعم نحو زاوية الحرف'
+      },
+      {
+        id: 'dal_s2',
+        stepNumber: 2,
+        label: 'قاعدة الدال: استقر أفقياً على السطر نحو اليسار',
+        startPoint: { x: 0.33, y: 0.64 },
+        endPoint: { x: 0.69, y: 0.64 },
+        directionDesc: 'امتداد أفقي مستقيم'
+      }
+    ]
   },
   {
     id: 'draw_raa',
@@ -192,7 +276,18 @@ export const PRESET_DRAWINGS: DrawingItem[] = [
     tolerance: 'normal',
     targetAccuracy: 75,
     points: 100,
-    arabicAudioText: 'رَاء'
+    arabicAudioText: 'رَاء',
+    enableStepsGuide: true,
+    steps: [
+      {
+        id: 'raa_s1',
+        stepNumber: 1,
+        label: 'انزلاق الراء: ابدأ من أعلى السطر وانزلق بقوس مقوس تحته',
+        startPoint: { x: 0.60, y: 0.31 },
+        endPoint: { x: 0.20, y: 0.83 },
+        directionDesc: 'قوس انسيابي شبيه بالهلال ينتهي برأس مدبب'
+      }
+    ]
   },
   {
     id: 'draw_seen',
@@ -206,7 +301,26 @@ export const PRESET_DRAWINGS: DrawingItem[] = [
     tolerance: 'easy',
     targetAccuracy: 70,
     points: 130,
-    arabicAudioText: 'سِين'
+    arabicAudioText: 'سِين',
+    enableStepsGuide: true,
+    steps: [
+      {
+        id: 'seen_s1',
+        stepNumber: 1,
+        label: 'أسنان السين: تتبع الأسنان الثلاثة من اليمين لليسار',
+        startPoint: { x: 0.78, y: 0.42 },
+        endPoint: { x: 0.54, y: 0.51 },
+        directionDesc: 'ثلاثة منحنيات صغيرة متتالية'
+      },
+      {
+        id: 'seen_s2',
+        stepNumber: 2,
+        label: 'كأس السين: صحن غائر ينزل تحت السطر ثم يصعد',
+        startPoint: { x: 0.54, y: 0.51 },
+        endPoint: { x: 0.19, y: 0.49 },
+        directionDesc: 'قوس غائر ينتهي بزاوية عليا'
+      }
+    ]
   },
 
   // SHAPES & OBJECTS

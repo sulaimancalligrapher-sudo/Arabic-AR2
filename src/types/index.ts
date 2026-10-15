@@ -135,6 +135,30 @@ export interface CursorState {
 export type DrawingTolerance = 'easy' | 'normal' | 'strict';
 export type DrawingMode = 'trace' | 'color';
 
+export interface DrawingStep {
+  id: string;
+  stepNumber: number;
+  label?: string; // e.g. "الخطوة 1: من اليمين إلى اليسار"
+  startPoint: { x: number; y: number }; // normalized 0..1 relative to canvas
+  endPoint: { x: number; y: number };   // normalized 0..1 relative to canvas
+  directionDesc?: string;
+}
+
+export interface StepEvaluationResult {
+  totalSteps: number;
+  completedSteps: number;
+  stepsAccuracy: number; // 0 to 100%
+  pathAccuracy: number;  // 0 to 100%
+  compositeScore: number; // 0 to 100%
+  feedbackMessage: string;
+  stepDetails: {
+    stepNumber: number;
+    completed: boolean;
+    validStart: boolean;
+    validEnd: boolean;
+  }[];
+}
+
 export interface DrawingItem {
   id: string;
   title: string;
@@ -151,6 +175,8 @@ export interface DrawingItem {
   isCustom?: boolean;
   guideColor?: 'yellow' | 'green' | 'white' | 'cyan' | 'black';
   createdAt?: string;
+  steps?: DrawingStep[]; // Sequence of numbered steps for Arabic letters / shapes
+  enableStepsGuide?: boolean; // Default true if steps exist
 }
 
 export interface DrawingResult {
@@ -161,7 +187,9 @@ export interface DrawingResult {
   drawingId: string;
   drawingTitle: string;
   mode: DrawingMode;
-  accuracy: number; // 0 to 100 percentage
+  accuracy: number; // 0 to 100 percentage (path matching)
+  stepsAccuracy?: number; // 0 to 100 percentage (step sequence & direction)
+  compositeScore?: number; // 0 to 100 composite
   score: number;
   attempts: number;
   timestamp: string;

@@ -217,6 +217,58 @@ class AudioService {
   }
 
   /**
+   * Play step completion sparkle sound (two-tone ascending chime)
+   */
+  public playStepSuccessSound() {
+    try {
+      const ctx = this.getAudioContext();
+      [659.25, 880].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.09);
+
+        gain.gain.setValueAtTime(0, ctx.currentTime + idx * 0.09);
+        gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + idx * 0.09 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.09 + 0.28);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(ctx.currentTime + idx * 0.09);
+        osc.stop(ctx.currentTime + idx * 0.09 + 0.3);
+      });
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Play warning sound for starting at wrong position in step sequence
+   */
+  public playStepWarningSound() {
+    try {
+      const ctx = this.getAudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(280, ctx.currentTime);
+      osc.frequency.setValueAtTime(220, ctx.currentTime + 0.08);
+
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.21);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
    * Play bubble pop / button click sound
    */
   public playPopSound() {

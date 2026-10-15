@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { DrawingItem, DrawingMode, DrawingTolerance } from '../../types';
+import { DrawingItem, DrawingMode, DrawingTolerance, DrawingStep } from '../../types';
 import { drawingEngineService, GUIDE_LINE_COLORS } from '../../services/drawingEngineService';
+import { PRESET_DRAWINGS } from '../../data/drawingData';
 import { whiteboardSyncService } from '../../services/whiteboardSyncService';
 import {
   X,
@@ -20,7 +21,12 @@ import {
   Hand,
   PenTool,
   Eye,
-  EyeOff
+  EyeOff,
+  Plus,
+  Target,
+  ArrowRight,
+  RotateCcw,
+  Compass
 } from 'lucide-react';
 
 interface DrawingAdminModalProps {
@@ -36,7 +42,7 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
   onDrawingsUpdated,
   initialEditingDrawingId
 }) => {
-  const [activeTab, setActiveTab] = useState<'upload' | 'manage' | 'student_controls'>('upload');
+  const [activeTab, setActiveTab] = useState<'upload' | 'step_maker' | 'manage' | 'student_controls'>('upload');
   const [editingDrawingId, setEditingDrawingId] = useState<string | null>(null);
   const [showGuidelines, setShowGuidelines] = useState(true);
 
@@ -66,15 +72,37 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
   const [arabicAudioText, setArabicAudioText] = useState('');
   const [guideColor, setGuideColor] = useState<'yellow' | 'green' | 'white' | 'cyan' | 'black'>('yellow');
   
+  // Step Maker State (نظام خطوات رسم الحروف وترقيمها)
+  const [steps, setSteps] = useState<DrawingStep[]>([]);
+  const [enableStepsGuide, setEnableStepsGuide] = useState<boolean>(true);
+  const [activeStepIndex, setActiveStepIndex] = useState<number>(0);
+  const [stepMakerMode, setStepMakerMode] = useState<'start' | 'end'>('start');
+  const [stepBgType, setStepBgType] = useState<'white' | 'grid' | 'dark'>('white');
+  const [invertImage, setInvertImage] = useState<boolean>(false);
+  const stepImageContainerRef = useRef<HTMLDivElement | null>(null);
+
   // Image preview
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Existing custom drawings
-  const [customList, setCustomList] = useState<DrawingItem[]>(
+  // Drawings list (both custom and preset)
+  const [customList, setCustomList] = useState<DrawingItem[]>(() =>
     drawingEngineService.getCustomDrawings()
   );
+  const [allDrawingsList, setAllDrawingsList] = useState<DrawingItem[]>(() =>
+    drawingEngineService.getAllDrawings()
+  );
+  const [hiddenPresetIds, setHiddenPresetIds] = useState<string[]>(() =>
+    drawingEngineService.getHiddenPresetIds()
+  );
+  const [manageFilter, setManageFilter] = useState<'all' | 'custom' | 'presets'>('all');
+
+  const refreshDrawingsList = () => {
+    setCustomList(drawingEngineService.getCustomDrawings());
+    setAllDrawingsList(drawingEngineService.getAllDrawings());
+    setHiddenPresetIds(drawingEngineService.getHiddenPresetIds());
+  };
 
   const resetForm = () => {
     setTitle('');
@@ -90,6 +118,64 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
     setImageUrl(null);
     setImageError(null);
     setEditingDrawingId(null);
+    setSteps([]);
+    setEnableStepsGuide(true);
+    setActiveStepIndex(0);
+    setStepMakerMode('start');
+    setStepBgType('white');
+    setInvertImage(false);
+  };
+
+  const handleAddStep = () => {
+    const nextNum = steps.length + 1;
+    const newStep: DrawingStep = {
+      id: 'step_' + Date.now(),
+      stepNumber: nextNum,
+      label: `الخطوة ${nextNum}`,
+      startPoint: { x: 0.5, y: 0.2 },
+      endPoint: { x: 0.5, y: 0.8 },
+      directionDesc: 'من الأعلى للأسفل'
+    };
+    setSteps([...steps, newStep]);
+    setActiveStepIndex(steps.length);
+    setStepMakerMode('start');
+  };
+
+  const handleDeleteStep = (indexToDelete: number) => {
+    const filtered = steps.filter((_, idx) => idx !== indexToDelete);
+    const renumbered = filtered.map((s, idx) => ({
+      ...s,
+      stepNumber: idx + 1,
+      label: `الخطوة ${idx + 1}`
+    }));
+    setSteps(renumbered);
+    if (activeStepIndex >= renumbered.length) {
+      setActiveStepIndex(Math.max(0, renumbered.length - 1));
+    }
+  };
+
+  const handleStepCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!stepImageContainerRef.current || steps.length === 0) return;
+    const rect = stepImageContainerRef.current.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const clickX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const clickY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+
+    const updated = [...steps];
+    const curr = { ...updated[activeStepIndex] };
+
+    if (stepMakerMode === 'start') {
+      curr.startPoint = { x: Math.round(clickX * 1000) / 1000, y: Math.round(clickY * 1000) / 1000 };
+      updated[activeStepIndex] = curr;
+      setSteps(updated);
+      // Auto-toggle to end mode for easy 2-click placement
+      setStepMakerMode('end');
+    } else {
+      curr.endPoint = { x: Math.round(clickX * 1000) / 1000, y: Math.round(clickY * 1000) / 1000 };
+      updated[activeStepIndex] = curr;
+      setSteps(updated);
+      setStepMakerMode('start');
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -114,11 +200,25 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
       if (!title) {
         setTitle(file.name.replace(/\.[^/.]+$/, ''));
       }
+      // Initialize with 1 default step if none exists
+      if (steps.length === 0) {
+        setSteps([
+          {
+            id: 'step_' + Date.now(),
+            stepNumber: 1,
+            label: 'الخطوة 1',
+            startPoint: { x: 0.5, y: 0.2 },
+            endPoint: { x: 0.5, y: 0.8 },
+            directionDesc: 'من البداية إلى النهاية'
+          }
+        ]);
+        setActiveStepIndex(0);
+      }
     };
     reader.readAsDataURL(file);
   };
 
-  const handleStartEdit = (item: DrawingItem) => {
+  const handleStartEdit = (item: DrawingItem, targetTab: 'upload' | 'step_maker' = 'upload') => {
     setEditingDrawingId(item.id);
     setTitle(item.title);
     setTitleEn(item.titleEn);
@@ -131,16 +231,22 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
     setArabicAudioText(item.arabicAudioText || '');
     setGuideColor(item.guideColor || 'yellow');
     setImageUrl(item.imageUrl);
+    setSteps(item.steps ? JSON.parse(JSON.stringify(item.steps)) : []);
+    setEnableStepsGuide(item.enableStepsGuide ?? ((item.steps && item.steps.length > 0) ? true : false));
+    setActiveStepIndex(0);
+    setStepMakerMode('start');
     setImageError(null);
-    setActiveTab('upload');
+    setActiveTab(targetTab);
   };
 
   useEffect(() => {
-    if (isOpen && initialEditingDrawingId) {
-      const allCustom = drawingEngineService.getCustomDrawings();
-      const target = allCustom.find(d => d.id === initialEditingDrawingId);
-      if (target) {
-        handleStartEdit(target);
+    if (isOpen) {
+      refreshDrawingsList();
+      if (initialEditingDrawingId) {
+        const target = drawingEngineService.getDrawingById(initialEditingDrawingId);
+        if (target) {
+          handleStartEdit(target);
+        }
       }
     }
   }, [isOpen, initialEditingDrawingId]);
@@ -160,8 +266,10 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
       return;
     }
 
+    const isPreset = editingDrawingId ? PRESET_DRAWINGS.some(p => p.id === editingDrawingId) : false;
+
     if (editingDrawingId) {
-      // Update existing drawing
+      // Update existing drawing (custom or preset override)
       const updatedItem: DrawingItem = {
         id: editingDrawingId,
         title: title.trim(),
@@ -175,11 +283,13 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
         points,
         arabicAudioText: arabicAudioText.trim() || title.trim(),
         guideColor,
-        isCustom: true,
-        createdAt: new Date().toLocaleDateString('ar-SA')
+        isCustom: !isPreset,
+        createdAt: new Date().toLocaleDateString('ar-SA'),
+        steps: steps.length > 0 ? steps : undefined,
+        enableStepsGuide: steps.length > 0 ? enableStepsGuide : false
       };
 
-      drawingEngineService.updateCustomDrawing(updatedItem);
+      drawingEngineService.updateAnyDrawing(updatedItem);
     } else {
       // Create new drawing
       const newItem: DrawingItem = {
@@ -196,23 +306,53 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
         arabicAudioText: arabicAudioText.trim() || title.trim(),
         guideColor,
         isCustom: true,
-        createdAt: new Date().toLocaleDateString('ar-SA')
+        createdAt: new Date().toLocaleDateString('ar-SA'),
+        steps: steps.length > 0 ? steps : undefined,
+        enableStepsGuide: steps.length > 0 ? enableStepsGuide : false
       };
 
       drawingEngineService.saveCustomDrawing(newItem);
     }
 
-    setCustomList(drawingEngineService.getCustomDrawings());
+    refreshDrawingsList();
     onDrawingsUpdated();
     resetForm();
     setActiveTab('manage');
   };
 
-  const handleDelete = (id: string) => {
-    drawingEngineService.deleteCustomDrawing(id);
-    setCustomList(drawingEngineService.getCustomDrawings());
+  const handleDelete = (id: string, isPreset: boolean) => {
+    const confirmMsg = isPreset
+      ? 'هل تريد إخفاء هذا الدرس الافتراضي من سبورة الطلاب؟ يمكنك استعادته في أي وقت بنقرة واحدة.'
+      : 'هل أنت متأكد من حذف هذه الرسمة المخصصة نهائياً؟';
+    if (!window.confirm(confirmMsg)) return;
+
+    drawingEngineService.deleteAnyDrawing(id);
+    refreshDrawingsList();
     if (editingDrawingId === id) {
       resetForm();
+    }
+    onDrawingsUpdated();
+  };
+
+  const handleRestorePreset = (id: string) => {
+    drawingEngineService.restorePresetDrawing(id);
+    refreshDrawingsList();
+    onDrawingsUpdated();
+  };
+
+  const handleRestoreAllPresets = () => {
+    drawingEngineService.restoreAllPresetDrawings();
+    refreshDrawingsList();
+    onDrawingsUpdated();
+  };
+
+  const handleResetPresetToOriginal = (id: string) => {
+    if (!window.confirm('هل تريد إلغاء التعديلات واستعادة خطوات وإعدادات النظام الأصلية لهذا الدرس؟')) return;
+    drawingEngineService.resetPresetToDefault(id);
+    refreshDrawingsList();
+    if (editingDrawingId === id) {
+      const orig = drawingEngineService.getDrawingById(id);
+      if (orig) handleStartEdit(orig);
     }
     onDrawingsUpdated();
   };
@@ -268,6 +408,20 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
 
           <button
             onClick={() => {
+              setActiveTab('step_maker');
+            }}
+            className={`pb-2.5 text-xs font-bold border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
+              activeTab === 'step_maker'
+                ? 'border-amber-400 text-amber-400'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <Compass className="w-3.5 h-3.5" />
+            <span>صانع خطوات الحرف (Step Maker) {steps.length > 0 ? `(${steps.length})` : ''}</span>
+          </button>
+
+          <button
+            onClick={() => {
               setActiveTab('manage');
             }}
             className={`pb-2.5 text-xs font-bold border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
@@ -297,7 +451,7 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
 
         {/* Content Body */}
         <div className="p-6 overflow-y-auto space-y-5 flex-1">
-          {activeTab === 'upload' ? (
+          {activeTab === 'upload' && (
             <div className="space-y-4 text-xs">
               
               {/* Image Design Guidelines Banner (Answers User Question!) */}
@@ -381,6 +535,31 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
                   </p>
                 )}
               </div>
+
+              {/* Step Maker Shortcut Banner */}
+              {imageUrl && (
+                <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                      <Compass className="w-4 h-4 text-amber-400" />
+                      <span>تحديد خطوات كتابة الحرف ونقاط البداية والنهاية (Step Maker)</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      {steps.length > 0
+                        ? `تم تحديد ${steps.length} خطوات لكتابة هذا الحرف بنقاط بداية خضراء ونهاية حمراء.`
+                        : 'حدد أين يبدأ الطالب رسم الحرف وأين ينتهي لتدريبه بالتسلسل الصحيح.'}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('step_maker')}
+                    className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shrink-0 shadow cursor-pointer transition-all"
+                  >
+                    <span>{steps.length > 0 ? 'تعديل الخطوات 🎯' : 'إعداد خطوات الحرف الآن 🎯'}</span>
+                    <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+                  </button>
+                </div>
+              )}
 
               {/* Titles */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -562,65 +741,574 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
                 </button>
               </div>
             </div>
-          ) : (
-            <div className="space-y-3">
-              {customList.length === 0 ? (
+          )}
+
+          {/* Tab 2: Step Maker (محرر خطوات الحرف ونقاط البداية والنهاية) */}
+          {activeTab === 'step_maker' && (
+            <div className="space-y-4 text-xs">
+              {!imageUrl ? (
+                <div className="p-6 rounded-2xl bg-slate-800/60 border border-slate-700 space-y-4">
+                  <div className="text-center space-y-2">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 mx-auto flex items-center justify-center">
+                      <Compass className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-sm font-bold text-white">اختر درساً لضبط خطواته أو ارفع صورة جديدة</h4>
+                    <p className="text-slate-400 text-xs max-w-md mx-auto">
+                      يمكنك تحديد مسار ونقاط البداية 🟢 والنهاية 🔴 لأي حرف أو رسمة في النظام، أو رفع صورة ممسوعة جديدة لخط اليد.
+                    </p>
+                  </div>
+
+                  {/* Quick Lesson Cards Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[260px] overflow-y-auto p-1">
+                    {allDrawingsList.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handleStartEdit(item, 'step_maker')}
+                        className="p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-amber-400 transition-all text-right flex items-center gap-2.5 cursor-pointer group"
+                      >
+                        <div className="w-10 h-10 rounded-lg bg-white p-1 shrink-0 flex items-center justify-center border border-slate-300 shadow-sm">
+                          <img src={item.imageUrl} alt={item.title} className="w-full h-full object-contain" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold text-white group-hover:text-amber-400 truncate text-[11px]">
+                            {item.title}
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {item.steps && item.steps.length > 0 ? `${item.steps.length} خطوات` : 'بدون خطوات'}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-center gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('upload')}
+                      className="px-4 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 cursor-pointer shadow flex items-center gap-2"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>رفع صورة ممسوحة جديدة (PNG / SVG)</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Active Lesson Header & Switcher */}
+                  <div className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-white p-1 border border-slate-300 shadow-sm shrink-0 flex items-center justify-center">
+                        <img src={imageUrl} alt={title} className="w-full h-full object-contain" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[11px] text-amber-400 font-semibold">أنت تعدل خطوات الدرس:</div>
+                        <div className="text-sm font-bold text-white truncate font-serif">{title || 'بدون عنوان'}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setImageUrl(null);
+                          setEditingDrawingId(null);
+                        }}
+                        className="px-2.5 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>اختيار درس آخر</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Instructions Banner */}
+                  <div className="p-3 rounded-2xl bg-amber-950/40 border border-amber-500/40 text-slate-200">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-amber-300 flex items-center gap-1.5 text-xs">
+                        <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>طريقة العمل: اضغط على مكان البداية 🟢 ثم مكان النهاية 🔴 على صورة الحرف</span>
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 font-mono">
+                        {steps.length} {steps.length === 1 ? 'خطوة' : 'خطوات'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                      💡 تم إلغاء الخطوط المستقيمة المنقطة لتناسب انحناءات الخط العربي الأصيل. سيظهر للطالب فقط دائرة البداية الخضراء النابضة وعلامة النهاية!
+                    </p>
+                  </div>
+
+                  {/* Step Selector Pills & Controls */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap bg-slate-950/70 p-2.5 rounded-2xl border border-slate-800">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {steps.map((st, idx) => (
+                        <button
+                          key={st.id || idx}
+                          type="button"
+                          onClick={() => {
+                            setActiveStepIndex(idx);
+                            setStepMakerMode('start');
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            activeStepIndex === idx
+                              ? 'bg-amber-500 text-slate-950 shadow-md ring-2 ring-amber-400/40'
+                              : 'bg-slate-800 text-slate-300 hover:text-white'
+                          }`}
+                        >
+                          <span>خطوة {st.stepNumber}</span>
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                        </button>
+                      ))}
+
+                      <button
+                        type="button"
+                        onClick={handleAddStep}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 border border-dashed border-amber-500/40 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>إضافة خطوة</span>
+                      </button>
+                    </div>
+
+                    {steps.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteStep(activeStepIndex)}
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                        title="حذف الخطوة الحالية"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف الخطوة {activeStepIndex + 1}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Active Step Placement Mode Buttons */}
+                  {steps.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-800/60 p-2.5 rounded-2xl border border-slate-700">
+                      <button
+                        type="button"
+                        onClick={() => setStepMakerMode('start')}
+                        className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                          stepMakerMode === 'start'
+                            ? 'bg-emerald-600 text-white border-emerald-400 shadow-md ring-2 ring-emerald-400/30 font-black'
+                            : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                        }`}
+                      >
+                        <span className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
+                        <span>1. تحديد نقطة البداية 🟢 (اضغط على الصورة لوضعها)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setStepMakerMode('end')}
+                        className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                          stepMakerMode === 'end'
+                            ? 'bg-rose-600 text-white border-rose-400 shadow-md ring-2 ring-rose-400/30 font-black'
+                            : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                        }`}
+                      >
+                        <Target className="w-4 h-4 text-rose-300" />
+                        <span>2. تحديد نقطة النهاية 🔴 (اضغط على الصورة لوضعها)</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Interactive Image Stage */}
+                  <div className="space-y-1.5">
+                    {/* Background toolbar & Invert (User Request Point 1: حل مشكلة الشاشة السوداء) */}
+                    <div className="flex items-center justify-between gap-2 p-2 bg-slate-900 rounded-xl border border-slate-800 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-slate-400 font-semibold text-[11px]">خلفية لوحة التحرير:</span>
+                        <button
+                          type="button"
+                          onClick={() => setStepBgType('white')}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold cursor-pointer transition-all ${
+                            stepBgType === 'white'
+                              ? 'bg-white text-slate-950 border-amber-400 shadow-md ring-1 ring-amber-400'
+                              : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+                          }`}
+                        >
+                          📄 ورقة بيضاء (الأوضح لخط اليد)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStepBgType('grid')}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold cursor-pointer transition-all ${
+                            stepBgType === 'grid'
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
+                              : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+                          }`}
+                        >
+                          📐 شبكة مربعات
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStepBgType('dark')}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold cursor-pointer transition-all ${
+                            stepBgType === 'dark'
+                              ? 'bg-slate-700 text-white border-amber-400 shadow-md'
+                              : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+                          }`}
+                        >
+                          ⬛ سبورة داكنة
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setInvertImage(!invertImage)}
+                        className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-all ${
+                          invertImage
+                            ? 'bg-amber-500 text-slate-950 border-amber-400'
+                            : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+                        }`}
+                        title="عكس لون الحبر بين الأسود والأبيض"
+                      >
+                        <span>🌓 عكس ألوان الحبر</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-300 px-1">
+                      <span>انقر بالفأرة لتثبيت {stepMakerMode === 'start' ? '🟢 نقطة البداية' : '🔴 نقطة النهاية'}</span>
+                      <span className="text-amber-400 font-semibold">
+                        الخطوة الحالية: {activeStepIndex + 1}
+                      </span>
+                    </div>
+
+                    {/* Canvas Stage: DEFAULT TO PURE WHITE for crystal clear calligraphy scan */}
+                    <div
+                      ref={stepImageContainerRef}
+                      onClick={handleStepCanvasClick}
+                      className={`relative w-full max-w-[560px] mx-auto aspect-[4/3] max-h-[350px] rounded-2xl overflow-hidden border-2 border-amber-500/50 flex items-center justify-center cursor-crosshair select-none shadow-2xl group transition-colors ${
+                        stepBgType === 'white'
+                          ? 'bg-white'
+                          : stepBgType === 'grid'
+                          ? 'bg-white bg-[radial-gradient(#94a3b8_1px,transparent_1px)] [background-size:16px_16px]'
+                          : 'bg-slate-950'
+                      }`}
+                    >
+                      {/* Base Image with optional contrast invert */}
+                      <img
+                        src={imageUrl}
+                        alt="Step Maker Base"
+                        style={{ filter: invertImage ? 'invert(1)' : 'none' }}
+                        className="w-full h-full object-contain pointer-events-none p-3 select-none"
+                      />
+
+                      {/* Straight connecting lines completely REMOVED as requested by user! */}
+
+                      {/* Step Markers Rendered */}
+                      {steps.map((st, idx) => {
+                        const isActive = idx === activeStepIndex;
+                        return (
+                          <React.Fragment key={st.id || idx}>
+                            {/* Start Point Pin (Green) */}
+                            <div
+                              style={{
+                                left: `${st.startPoint.x * 100}%`,
+                                top: `${st.startPoint.y * 100}%`,
+                                transform: 'translate(-50%, -50%)'
+                              }}
+                              className={`absolute z-20 flex items-center justify-center rounded-full pointer-events-none transition-transform ${
+                                isActive ? 'scale-110' : 'opacity-85'
+                              }`}
+                            >
+                              <div className="relative flex items-center justify-center">
+                                {isActive && (
+                                  <span className="absolute w-8 h-8 rounded-full bg-emerald-400/40 animate-ping" />
+                                )}
+                                <div className="w-6 h-6 rounded-full bg-emerald-500 border-2 border-white shadow-lg text-slate-950 font-black text-[11px] flex items-center justify-center">
+                                  {st.stepNumber}
+                                </div>
+                                <span className="absolute -bottom-4 bg-slate-950/90 text-emerald-300 text-[9px] px-1 rounded border border-emerald-500/30 whitespace-nowrap shadow-sm">
+                                  بداية {st.stepNumber} 🟢
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* End Point Pin (Red / Target) */}
+                            <div
+                              style={{
+                                left: `${st.endPoint.x * 100}%`,
+                                top: `${st.endPoint.y * 100}%`,
+                                transform: 'translate(-50%, -50%)'
+                              }}
+                              className={`absolute z-20 flex items-center justify-center rounded-full pointer-events-none transition-transform ${
+                                isActive ? 'scale-110' : 'opacity-85'
+                              }`}
+                            >
+                              <div className="relative flex items-center justify-center">
+                                <div className="w-6 h-6 rounded-full bg-rose-500 border-2 border-white shadow-lg text-white font-black text-[11px] flex items-center justify-center">
+                                  {st.stepNumber}
+                                </div>
+                                <span className="absolute -bottom-4 bg-slate-950/90 text-rose-300 text-[9px] px-1 rounded border border-rose-500/30 whitespace-nowrap shadow-sm">
+                                  نهاية {st.stepNumber} 🎯
+                                </span>
+                              </div>
+                            </div>
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Step Description & Enforcement Toggle */}
+                  {steps.length > 0 && steps[activeStepIndex] && (
+                    <div className="p-3 bg-slate-900 border border-slate-800 rounded-2xl space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-slate-300 font-semibold text-xs">
+                          وصف اتجاه الخطوة {activeStepIndex + 1}:
+                        </label>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {['من اليمين لليسار', 'من الأعلى للأسفل', 'انحناء مقوس', 'نقطة واحدة'].map((txt) => (
+                            <button
+                              key={txt}
+                              type="button"
+                              onClick={() => {
+                                const upd = [...steps];
+                                upd[activeStepIndex].directionDesc = txt;
+                                setSteps(upd);
+                              }}
+                              className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] cursor-pointer"
+                            >
+                              {txt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <input
+                        type="text"
+                        value={steps[activeStepIndex].directionDesc || ''}
+                        onChange={(e) => {
+                          const upd = [...steps];
+                          upd[activeStepIndex].directionDesc = e.target.value;
+                          setSteps(upd);
+                        }}
+                        placeholder="مثال: من طرف السن اليمين نزولاً ثم الصعود يساراً"
+                        className="w-full px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-xs focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
+                  )}
+
+                  {/* Enforcement Toggle */}
+                  <label className="flex items-center gap-2 p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-xs text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enableStepsGuide}
+                      onChange={(e) => setEnableStepsGuide(e.target.checked)}
+                      className="w-4 h-4 accent-amber-500 rounded"
+                    />
+                    <span>
+                      <strong>تفعيل نظام التوجيه والتقييم بالخطوات:</strong> يلزم الطالب بالبدء من النقطة الخضراء المتوهجة لكل خطوة، ويعطي تنبيهاً إذا بدأ من مكان خاطئ.
+                    </span>
+                  </label>
+
+                  {/* Save Buttons directly in Step Maker */}
+                  <div className="flex items-center justify-between gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('upload')}
+                      className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 cursor-pointer"
+                    >
+                      ← العودة لإعدادات الرسمة
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveDrawing}
+                      className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md shadow-amber-500/25 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>حفظ خطوات الحرف فوراً وإتاحتها للطلاب</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab 3: Manage Drawings (User Question: تعديل وحذف الدروس الافتراضية والمخصصة) */}
+          {activeTab === 'manage' && (
+            <div className="space-y-4">
+              {/* Filter Tabs */}
+              <div className="flex items-center justify-between gap-2 flex-wrap pb-1 border-b border-slate-800">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setManageFilter('all')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      manageFilter === 'all'
+                        ? 'bg-amber-500 text-slate-950 shadow-md'
+                        : 'bg-slate-800 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    <span>جميع الدروس ({allDrawingsList.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setManageFilter('custom')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      manageFilter === 'custom'
+                        ? 'bg-amber-500 text-slate-950 shadow-md'
+                        : 'bg-slate-800 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    <span>الدروس المرفوعة والمخصصة ({customList.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setManageFilter('presets')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      manageFilter === 'presets'
+                        ? 'bg-amber-500 text-slate-950 shadow-md'
+                        : 'bg-slate-800 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    <span>دروس النظام الافتراضية ({PRESET_DRAWINGS.length - hiddenPresetIds.length})</span>
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('upload')}
+                  className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 text-xs font-bold flex items-center gap-1 cursor-pointer transition-all"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>رفع درس جديد</span>
+                </button>
+              </div>
+
+              {/* Notice for Hidden Presets if any */}
+              {hiddenPresetIds.length > 0 && (
+                <div className="p-3 rounded-2xl bg-amber-950/40 border border-amber-500/40 flex items-center justify-between gap-3 text-xs flex-wrap">
+                  <span className="text-amber-300 font-semibold flex items-center gap-1.5">
+                    <Info className="w-4 h-4 text-amber-400" />
+                    <span>يوجد {hiddenPresetIds.length} من دروس النظام الافتراضية مخفية عن الطلاب حالياً.</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleRestoreAllPresets}
+                    className="px-3 py-1 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 cursor-pointer shadow"
+                  >
+                    استعادة جميع الدروس المحذوفة 🔄
+                  </button>
+                </div>
+              )}
+
+              {/* Drawings List */}
+              {allDrawingsList
+                .filter((item) => {
+                  if (manageFilter === 'custom') return item.isCustom;
+                  if (manageFilter === 'presets') return !item.isCustom;
+                  return true;
+                })
+                .map((item) => {
+                  const isPreset = PRESET_DRAWINGS.some(p => p.id === item.id);
+                  const isOverridden = isPreset && !!drawingEngineService.getPresetOverrides()[item.id];
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-between gap-3 shadow-md hover:border-slate-600 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <img
+                          src={item.imageUrl}
+                          alt={item.title}
+                          className="w-14 h-14 rounded-xl object-contain bg-white p-1 border border-slate-700 shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-sm font-bold text-white font-serif truncate">{item.title}</h4>
+                            
+                            {/* Preset vs Custom Badge */}
+                            {isPreset ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 shrink-0 font-medium">
+                                درس افتراضي للنظام 🏛️
+                              </span>
+                            ) : (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0 font-medium">
+                                مخصص / مرفوع 📁
+                              </span>
+                            )}
+
+                            {isOverridden && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0 font-semibold">
+                                مُعدّل ✏️
+                              </span>
+                            )}
+
+                            {item.steps && item.steps.length > 0 && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                                {item.steps.length} خطوات مرقمة 🎯
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">
+                            دقة مطلوبة {item.targetAccuracy}% · {item.points} نقطة · خط إرشادي: {GUIDE_LINE_COLORS.find(c => c.id === (item.guideColor || 'yellow'))?.name || 'أصفر'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                        {/* Step Maker Shortcut Button */}
+                        <button
+                          onClick={() => handleStartEdit(item, 'step_maker')}
+                          className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 text-amber-300 border border-amber-500/30 transition-colors flex items-center gap-1 text-xs font-bold cursor-pointer"
+                          title="تعديل وضبط خطوات ونقاط البداية والنهاية"
+                        >
+                          <Target className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">صانع الخطوات</span>
+                        </button>
+
+                        {/* Edit Settings Button */}
+                        <button
+                          onClick={() => handleStartEdit(item, 'upload')}
+                          className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600 transition-colors flex items-center gap-1 text-xs font-semibold cursor-pointer"
+                          title="تعديل إعدادات الاسم والشفافية والدقة"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">تعديل</span>
+                        </button>
+
+                        {/* Reset Preset to Original if overridden */}
+                        {isOverridden && (
+                          <button
+                            onClick={() => handleResetPresetToOriginal(item.id)}
+                            className="p-1.5 sm:px-2 sm:py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer text-xs"
+                            title="استعادة الإعدادات الأصلية للنظام لهذا الدرس"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        {/* Delete or Hide Button */}
+                        <button
+                          onClick={() => handleDelete(item.id, isPreset)}
+                          className="p-1.5 sm:px-2 sm:py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800 transition-colors cursor-pointer"
+                          title={isPreset ? 'إخفاء هذا الدرس الافتراضي من النظام' : 'حذف الرسمة نهائياً'}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+              {allDrawingsList.length === 0 && (
                 <div className="text-center py-12 text-slate-400 text-xs space-y-2">
-                  <p>لم يتم رفع أي رسمة مخصصة حتى الآن.</p>
+                  <p>لا توجد دروس حالياً.</p>
                   <button
                     onClick={() => setActiveTab('upload')}
                     className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 cursor-pointer"
                   >
-                    رفع أول رسمة الآن ←
+                    رفع درس جديد الآن ←
                   </button>
                 </div>
-              ) : (
-                customList.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-between gap-3 shadow-md hover:border-slate-600 transition-colors"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <img
-                        src={item.imageUrl}
-                        alt={item.title}
-                        className="w-14 h-14 rounded-xl object-contain bg-white p-1 border border-slate-700 shrink-0"
-                      />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-white font-serif truncate">{item.title}</h4>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
-                            {item.mode === 'color' ? 'تلوين' : 'تتبع خط'}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          دقة مطلوبة {item.targetAccuracy}% · {item.points} نقطة · خط إرشادي: {GUIDE_LINE_COLORS.find(c => c.id === (item.guideColor || 'yellow'))?.name || 'أصفر'}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      {/* Edit Button (User Request Point 4!) */}
-                      <button
-                        onClick={() => handleStartEdit(item)}
-                        className="p-2 rounded-xl bg-slate-700 hover:bg-amber-500 hover:text-slate-950 text-slate-200 border border-slate-600 transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
-                        title="تعديل إعدادات هذه الرسمة"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">تعديل</span>
-                      </button>
-
-                      {/* Delete Button */}
-                      <button
-                        onClick={() => handleDelete(item.id)}
-                        className="p-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800 transition-colors cursor-pointer"
-                        title="حذف الرسمة"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))
               )}
             </div>
           )}

@@ -313,9 +313,100 @@ class DrawingEngineService {
     localStorage.setItem(CUSTOM_DRAWINGS_KEY, JSON.stringify(list));
   }
 
+  /**
+   * Preset Drawings Management (User Question: كيف أعدل أو أحذف الدروس الافتراضية؟)
+   */
+  public getPresetOverrides(): Record<string, DrawingItem> {
+    try {
+      const stored = localStorage.getItem('baseera_preset_overrides');
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  public savePresetOverride(item: DrawingItem): void {
+    const overrides = this.getPresetOverrides();
+    overrides[item.id] = { ...item, isCustom: false };
+    localStorage.setItem('baseera_preset_overrides', JSON.stringify(overrides));
+  }
+
+  public resetPresetToDefault(id: string): void {
+    const overrides = this.getPresetOverrides();
+    delete overrides[id];
+    localStorage.setItem('baseera_preset_overrides', JSON.stringify(overrides));
+  }
+
+  public getHiddenPresetIds(): string[] {
+    try {
+      const stored = localStorage.getItem('baseera_hidden_presets');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  public hidePresetDrawing(id: string): void {
+    const hidden = this.getHiddenPresetIds();
+    if (!hidden.includes(id)) {
+      hidden.push(id);
+      localStorage.setItem('baseera_hidden_presets', JSON.stringify(hidden));
+    }
+  }
+
+  public restorePresetDrawing(id: string): void {
+    const hidden = this.getHiddenPresetIds().filter(hId => hId !== id);
+    localStorage.setItem('baseera_hidden_presets', JSON.stringify(hidden));
+  }
+
+  public restoreAllPresetDrawings(): void {
+    localStorage.removeItem('baseera_hidden_presets');
+  }
+
+  /**
+   * Unified Get All Drawings: Custom + Modified Presets - Hidden Presets
+   */
   public getAllDrawings(): DrawingItem[] {
     const custom = this.getCustomDrawings();
-    return [...custom, ...PRESET_DRAWINGS];
+    const overrides = this.getPresetOverrides();
+    const hiddenIds = new Set(this.getHiddenPresetIds());
+
+    const activePresets = PRESET_DRAWINGS
+      .filter(p => !hiddenIds.has(p.id))
+      .map(p => overrides[p.id] ? { ...p, ...overrides[p.id] } : p);
+
+    return [...custom, ...activePresets];
+  }
+
+  /**
+   * Unified update: handles both custom and preset items
+   */
+  public updateAnyDrawing(item: DrawingItem): void {
+    const isPreset = PRESET_DRAWINGS.some(p => p.id === item.id);
+    if (isPreset) {
+      this.savePresetOverride(item);
+    } else {
+      this.updateCustomDrawing(item);
+    }
+  }
+
+  /**
+   * Unified delete: removes custom or hides preset
+   */
+  public deleteAnyDrawing(id: string): void {
+    const isPreset = PRESET_DRAWINGS.some(p => p.id === id);
+    if (isPreset) {
+      this.hidePresetDrawing(id);
+    } else {
+      this.deleteCustomDrawing(id);
+    }
+  }
+
+  /**
+   * Find drawing by ID across custom or presets
+   */
+  public getDrawingById(id: string): DrawingItem | undefined {
+    return this.getAllDrawings().find(d => d.id === id);
   }
 }
 
