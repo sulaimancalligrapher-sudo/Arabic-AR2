@@ -405,6 +405,13 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             : allDrawings.find((d) => d.id === drawingId);
 
         if (found) {
+          if (found.isCustom) {
+            try {
+              drawingEngineService.saveCustomDrawing(found);
+            } catch {
+              // Ignore local storage quota limits if image is large
+            }
+          }
           setCurrentDrawing(found);
           clearCanvas();
           setLessonEndedByTeacher(false);
@@ -1983,7 +1990,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
               showVideo && inputMethod === 'hand' ? 'opacity-90' : 'opacity-0'
             }`}
             style={{
-              filter: 'brightness(1.35) contrast(1.15) saturate(1.15)'
+              filter: 'brightness(1.05) contrast(1.1) saturate(1.2)'
             }}
           />
 
@@ -2111,25 +2118,53 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             </div>
           )}
 
-          {/* Floating Live Step Alert Banner */}
-          {stepAlert && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-45 animate-in fade-in slide-in-from-top-3 duration-200 pointer-events-none">
-              <div className={`px-4 py-2 rounded-2xl border shadow-2xl backdrop-blur-md flex items-center gap-2 text-xs sm:text-sm font-bold ${
-                stepAlert.type === 'error'
-                  ? 'bg-rose-950/90 border-rose-500/80 text-rose-200'
-                  : stepAlert.type === 'success'
-                  ? 'bg-emerald-950/90 border-emerald-500/80 text-emerald-200'
-                  : 'bg-amber-950/90 border-amber-500/80 text-amber-200'
-              }`}>
+          {/* ============================================================== */}
+          {/* UNIFIED HUD GUIDANCE BOX: Single Dynamic Adaptive Container   */}
+          {/* All alerts, step guidelines, and drawing states unified in ONE box */}
+          {/* ============================================================== */}
+          <div className="absolute top-2.5 sm:top-3.5 left-1/2 -translate-x-1/2 z-45 max-w-[94%] sm:max-w-xl w-max pointer-events-none transition-all duration-300">
+            {stepAlert ? (
+              /* PRIORITY 1: High-Priority Live Step Alert Toast */
+              <div
+                className={`px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-2.5 text-xs sm:text-sm font-bold border backdrop-blur-md animate-in fade-in zoom-in-95 duration-200 ${
+                  stepAlert.type === 'error'
+                    ? 'bg-rose-950/95 border-rose-500 text-rose-200 shadow-rose-500/30 ring-2 ring-rose-500/40'
+                    : stepAlert.type === 'success'
+                    ? 'bg-emerald-950/95 border-emerald-500 text-emerald-200 shadow-emerald-500/30 ring-2 ring-emerald-500/40'
+                    : 'bg-amber-950/95 border-amber-500 text-amber-200 shadow-amber-500/30 ring-2 ring-amber-500/40'
+                }`}
+              >
                 {stepAlert.type === 'error' ? (
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-rose-400 shrink-0 animate-bounce" />
+                ) : stepAlert.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 shrink-0" />
                 ) : (
-                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                  <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400 shrink-0" />
                 )}
-                <span>{stepAlert.message}</span>
+                <span className="font-sans font-bold leading-tight">{stepAlert.message}</span>
               </div>
-            </div>
-          )}
+            ) : hasStepsGuide && steps.length > 0 ? (
+              /* PRIORITY 2: Step-by-Step Arabic Calligraphy Guidance */
+              <div className="bg-slate-950/90 border border-emerald-500/50 shadow-2xl backdrop-blur-md px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-2xl flex items-center gap-2 sm:gap-2.5 text-xs sm:text-sm animate-in fade-in duration-200">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                <span className="font-black text-amber-300 font-mono text-xs sm:text-sm px-1.5 py-0.5 rounded-md bg-amber-400/10 border border-amber-400/20 shrink-0">
+                  خطوة {steps[currentStepIndex]?.stepNumber || (currentStepIndex + 1)} / {steps.length}
+                </span>
+                <span className="text-white font-bold truncate max-w-[200px] sm:max-w-xs">
+                  {isPenDown
+                    ? '🖌️ اسحب القلم باتجاه الهدف الأحمر 🎯'
+                    : steps[currentStepIndex]?.label ||
+                      steps[currentStepIndex]?.directionDesc ||
+                      'ابدأ من النقطة الخضراء المتوهجة 🟢'}
+                </span>
+                {!isSessionActive && (
+                  <span className="text-[10px] text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-full font-medium shrink-0 hidden sm:inline">
+                    (اضغط «ابدأ الرسم» للبدء)
+                  </span>
+                )}
+              </div>
+            ) : null}
+          </div>
 
           {/* Interactive In-Canvas Button (Start / Finish Session) - PC & Desktop Only */}
           {!isMobileDevice && flowState === 'drawing' && (

@@ -65,7 +65,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isCameraStarting, setIsCameraStarting] = useState(false);
   const [showVideoFeed, setShowVideoFeed] = useState(true);
-  const [brightness, setBrightness] = useState<number>(1.5);
+  const [brightness, setBrightness] = useState<number>(1.05);
   const [isCalibrationOpen, setIsCalibrationOpen] = useState(false);
 
   // Camera resolution & aspect ratio (Guarantees zero skeleton offset with real hand)
@@ -1578,7 +1578,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
               inputMode === 'ar_hand' && showVideoFeed ? 'opacity-90' : 'opacity-0'
             }`}
             style={{
-              filter: `brightness(${brightness}) contrast(1.15) saturate(1.15)`
+              filter: `brightness(${brightness}) contrast(1.1) saturate(1.2)`
             }}
           />
 
@@ -1711,40 +1711,6 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
                 </div>
               )}
 
-              {/* Step HUD Top Banner Inside Canvas Frame */}
-              <div className="absolute top-2.5 left-1/2 -translate-x-1/2 bg-slate-950/85 backdrop-blur-md px-3.5 py-1 rounded-full border border-emerald-500/40 shadow-xl flex items-center gap-2 text-xs">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                <span className="font-bold text-amber-300 font-mono">
-                  خطوة {steps[currentStepIndex]?.stepNumber || 1} / {steps.length}:
-                </span>
-                <span className="text-white text-[11px] font-semibold truncate max-w-[200px] sm:max-w-[340px]">
-                  {steps[currentStepIndex]?.label || steps[currentStepIndex]?.directionDesc || 'ابدأ من النقطة الخضراء المتوهجة'}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Real-Time Step Alert Toast Inside Canvas */}
-          {stepAlert && (
-            <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-2 duration-200 pointer-events-none">
-              <div
-                className={`px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-2 text-xs font-bold border backdrop-blur-md ${
-                  stepAlert.type === 'error'
-                    ? 'bg-rose-950/90 border-rose-500 text-rose-200 shadow-rose-500/25'
-                    : stepAlert.type === 'success'
-                    ? 'bg-emerald-950/90 border-emerald-500 text-emerald-200 shadow-emerald-500/25'
-                    : 'bg-amber-950/90 border-amber-500 text-amber-200 shadow-amber-500/25'
-                }`}
-              >
-                {stepAlert.type === 'error' ? (
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                ) : stepAlert.type === 'success' ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                ) : (
-                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                )}
-                <span>{stepAlert.message}</span>
-              </div>
             </div>
           )}
 
@@ -1847,77 +1813,85 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
           </div>
         )}
 
-        {/* Dynamic Pen & Gesture State Indicator */}
-        <div className="absolute top-4 z-30 flex flex-col items-center gap-1.5 pointer-events-none max-w-lg px-4 text-center">
-          {!isDrawingSessionActive ? (
-            <div className="bg-slate-900/95 border-2 border-emerald-500/70 px-4 py-2 rounded-2xl text-xs font-bold text-white flex items-center gap-2.5 shadow-2xl backdrop-blur-md animate-pulse">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-              <span>
-                {inputMode === 'ar_hand'
-                  ? '👈 حرّك يدك إلى زر «ابدأ الرسم» بالأعلى وانقر بإصبعين 🤏 للبدء'
-                  : 'اضغط على زر «ابدأ الرسم» للبدء'}
+        {/* ============================================================== */}
+        {/* UNIFIED HUD GUIDANCE BOX: Single Dynamic Adaptive Container   */}
+        {/* All alerts, step guidelines, and drawing states unified in ONE box */}
+        {/* ============================================================== */}
+        <div className="absolute top-2.5 sm:top-3.5 left-1/2 -translate-x-1/2 z-40 max-w-[94%] sm:max-w-xl w-max pointer-events-none transition-all duration-300">
+          {stepAlert ? (
+            /* PRIORITY 1: High-Priority Live Alert (Error / Success / Warning) */
+            <div
+              className={`px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-2.5 text-xs sm:text-sm font-bold border backdrop-blur-md animate-in fade-in zoom-in-95 duration-200 ${
+                stepAlert.type === 'error'
+                  ? 'bg-rose-950/95 border-rose-500 text-rose-200 shadow-rose-500/30 ring-2 ring-rose-500/40'
+                  : stepAlert.type === 'success'
+                  ? 'bg-emerald-950/95 border-emerald-500 text-emerald-200 shadow-emerald-500/30 ring-2 ring-emerald-500/40'
+                  : 'bg-amber-950/95 border-amber-500 text-amber-200 shadow-amber-500/30 ring-2 ring-amber-500/40'
+              }`}
+            >
+              {stepAlert.type === 'error' ? (
+                <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-rose-400 shrink-0 animate-bounce" />
+              ) : stepAlert.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 shrink-0" />
+              ) : (
+                <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400 shrink-0" />
+              )}
+              <span className="font-sans font-bold leading-tight">{stepAlert.message}</span>
+            </div>
+          ) : hasStepsGuide && steps.length > 0 ? (
+            /* PRIORITY 2: Step-by-Step Arabic Calligraphy Guidance */
+            <div className="bg-slate-950/90 border border-emerald-500/50 shadow-2xl backdrop-blur-md px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-2xl flex items-center gap-2 sm:gap-2.5 text-xs sm:text-sm animate-in fade-in duration-200">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+              <span className="font-black text-amber-300 font-mono text-xs sm:text-sm px-1.5 py-0.5 rounded-md bg-amber-400/10 border border-amber-400/20 shrink-0">
+                خطوة {steps[currentStepIndex]?.stepNumber || (currentStepIndex + 1)} / {steps.length}
               </span>
+              <span className="text-white font-bold truncate max-w-[200px] sm:max-w-xs">
+                {isPenDown
+                  ? '🖌️ اسحب القلم باتجاه الهدف الأحمر 🎯'
+                  : steps[currentStepIndex]?.label ||
+                    steps[currentStepIndex]?.directionDesc ||
+                    'ابدأ من النقطة الخضراء المتوهجة 🟢'}
+              </span>
+              {!isDrawingSessionActive && (
+                <span className="text-[10px] text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-full font-medium shrink-0 hidden sm:inline">
+                  (اضغط «ابدأ الرسم» للبدء)
+                </span>
+              )}
             </div>
           ) : (
-            <>
-              {inputMode === 'ar_hand' ? (
-                <div
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-2xl backdrop-blur-md transition-all duration-200 border ${
-                    isPenDown
-                      ? 'bg-emerald-950/90 border-emerald-400/80 text-emerald-300 ring-4 ring-emerald-500/20 scale-105'
-                      : 'bg-slate-900/90 border-slate-700 text-slate-300'
-                  }`}
-                >
-                  {isPenDown ? (
-                    <>
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-                      <span className="flex items-center gap-1.5">
-                        ✍️ <strong className="text-white">القلم مثبّت ويرسم الآن</strong>
-                        <span className="text-emerald-300/80 font-normal">
-                          {gestureMode.includes('latch')
-                            ? '(افرد أصابعك للتوقف ✋)'
-                            : '(الأصابع مضمومة)'}
-                        </span>
-                      </span>
-                    </>
+            /* PRIORITY 3: General Drawing & Gesture Session Guidance */
+            <div className="bg-slate-900/95 border border-slate-700/80 shadow-2xl backdrop-blur-md px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-2xl flex items-center gap-2 sm:gap-2.5 text-xs sm:text-sm animate-in fade-in duration-200">
+              <span
+                className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                  isDrawingSessionActive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                }`}
+              />
+              <span className="text-slate-200 font-semibold truncate max-w-[260px] sm:max-w-md">
+                {!isDrawingSessionActive ? (
+                  inputMode === 'ar_hand'
+                    ? '👈 حرّك يدك إلى زر «ابدأ الرسم» وانقر بإصبعين 🤏 للبدء'
+                    : 'اضغط على زر «ابدأ الرسم» للبدء ◀️'
+                ) : inputMode === 'ar_hand' ? (
+                  isPenDown ? (
+                    <span className="text-emerald-300 font-bold">
+                      ✍️ القلم مثبّت ويرسم الآن (افرد أصابعك للتوقف ✋)
+                    </span>
                   ) : (
-                    <>
-                      <span className="w-2 h-2 rounded-full bg-amber-400" />
-                      <span className="flex items-center gap-1.5">
-                        ✋ <span>القلم متوقف</span>
-                        <span className="text-slate-400 font-normal">
-                          {gestureMode === 'three_finger_latch'
-                            ? '(ضم الـ 3 أصابع لبدء التثبيت والرسم)'
-                            : gestureMode === 'two_finger_latch'
-                            ? '(ضم الإصبعين للتثبيت)'
-                            : gestureMode === 'three_finger'
-                            ? '(ضم الـ 3 أصابع للرسم)'
-                            : gestureMode === 'two_finger'
-                            ? '(اقبض بالإصبعين للرسم)'
-                            : '(حرّك السبابة للرسم)'}
-                        </span>
-                      </span>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <div className="bg-slate-900/90 border border-slate-700/80 px-4 py-1.5 rounded-full text-xs text-slate-300 flex items-center gap-2 shadow-lg">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span>الجلسة نشطة: اضغط واسحب بالماوس للرسم، واضغط «إنهاء» عند الاكتمال</span>
-                </div>
-              )}
-
-              {coverage >= drawing.targetAccuracy && (
-                <div className="bg-emerald-950/90 border border-emerald-500/50 text-emerald-300 px-3 py-1 rounded-full text-[11px] font-bold flex items-center gap-1.5 shadow animate-in fade-in">
-                  <span>🏆 تم تحقيق نسبة الإتقان المطلوبة ({coverage}%)! استمر بالرسم أو انقر «إنهاء الرسم» بإصبعين 🤏 لحفظ النتيجة.</span>
-                </div>
-              )}
-            </>
+                    <span className="text-amber-300 font-medium">
+                      ✋ ضم أصابعك لبدء التثبيت والرسم ✍️
+                    </span>
+                  )
+                ) : (
+                  'الجلسة نشطة: اسحب للرسم واضغط «إنهاء» عند الاكتمال ✔️'
+                )}
+              </span>
+            </div>
           )}
 
-          {inputMode === 'ar_hand' && isDrawingSessionActive && gestureMode === 'three_finger' && !isPenDown && (
-            <div className="bg-slate-950/85 border border-slate-800 text-slate-400 px-3 py-0.5 rounded-full text-[11px] flex items-center gap-1.5 shadow">
-              <span>💡 مسكة القلم: ضم (الإبهام + السبابة + الوسطى) للرسم، وافتحها للتنقل بحرية دون رسم.</span>
+          {/* Achievement Toast (If Target Accuracy is reached) */}
+          {coverage >= drawing.targetAccuracy && !stepAlert && (
+            <div className="mt-1 bg-emerald-950/90 border border-emerald-500/60 text-emerald-200 px-3 py-0.5 rounded-full text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-lg mx-auto w-max animate-in fade-in">
+              <span>🏆 تم تحقيق نسبة الإتقان المطلوبة ({coverage}%)! انقر «إنهاء» لحفظ نتيجتك.</span>
             </div>
           )}
         </div>

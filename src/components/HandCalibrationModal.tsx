@@ -43,8 +43,8 @@ export const HandCalibrationModal: React.FC<HandCalibrationModalProps> = ({
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number }>({ x: 0.5, y: 0.5 });
   const [hasSucceededPen, setHasSucceededPen] = useState(false);
 
-  // Brightness Control (1.0 = normal, 1.5 = boosted, 2.0 = bright, 2.5 = ultra)
-  const [brightness, setBrightness] = useState<number>(1.5);
+  // Brightness Control (1.05 = natural realistic, 1.3 = boosted, 1.6 = bright)
+  const [brightness, setBrightness] = useState<number>(1.05);
   // Sensitivity Control
   const [sensitivity, setSensitivity] = useState<PinchSensitivity>('easy');
 
@@ -106,7 +106,7 @@ export const HandCalibrationModal: React.FC<HandCalibrationModalProps> = ({
     setBrightness(val);
     handTrackingService.setBrightnessMultiplier(val);
     if (videoRef.current) {
-      videoRef.current.style.filter = `brightness(${val}) contrast(1.15) saturate(1.15)`;
+      videoRef.current.style.filter = `brightness(${val}) contrast(1.1) saturate(1.2)`;
     }
   };
 
@@ -343,7 +343,7 @@ export const HandCalibrationModal: React.FC<HandCalibrationModalProps> = ({
                 className="absolute inset-0 w-full h-full object-cover -scale-x-100 transition-opacity duration-300"
                 style={{
                   opacity: 1.0,
-                  filter: `brightness(${brightness}) contrast(1.15) saturate(1.15)`
+                  filter: `brightness(${brightness}) contrast(1.1) saturate(1.2)`
                 }}
               />
 
@@ -483,10 +483,10 @@ export const HandCalibrationModal: React.FC<HandCalibrationModalProps> = ({
 
               <div className="flex items-center gap-1.5 flex-wrap">
                 {[
-                  { label: '100% (طبيعي)', val: 1.0 },
-                  { label: '150% (مشرق ☀️)', val: 1.5 },
-                  { label: '200% (فائق الإضاءة 💡)', val: 2.0 },
-                  { label: '250% (إضاءة ليلية ⚡)', val: 2.5 }
+                  { label: 'معايرة طبيعية (105%) ✨', val: 1.05 },
+                  { label: 'إضاءة معتدلة (120%) ☀️', val: 1.2 },
+                  { label: 'إضاءة قوية (150%) 💡', val: 1.5 },
+                  { label: 'إضاءة خافتة (90%) 🌙', val: 0.9 }
                 ].map(opt => (
                   <button
                     key={opt.val}

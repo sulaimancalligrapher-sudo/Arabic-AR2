@@ -66,6 +66,39 @@ export const DrawingStudio: React.FC<DrawingStudioProps> = ({
     setTimeout(() => setFeedbackToast(null), 4000);
   };
 
+  // Auto-detect and import shared lesson from URL (#lesson=... or ?shareLesson=...)
+  useEffect(() => {
+    const handleUrlImport = () => {
+      let rawData = '';
+      if (window.location.hash.startsWith('#lesson=')) {
+        rawData = window.location.hash.replace('#lesson=', '');
+      } else {
+        const params = new URLSearchParams(window.location.search);
+        rawData = params.get('shareLesson') || params.get('lessonData') || '';
+      }
+
+      if (rawData) {
+        const imported = drawingEngineService.decodeLessonFromSharePayload(rawData);
+        if (imported) {
+          drawingEngineService.saveCustomDrawing(imported);
+          setAllDrawings(drawingEngineService.getAllDrawings());
+          setSelectedDrawing(imported);
+          showNotification(`✨ تم بنجاح استيراد درس «${imported.title}» وحفظه على هذا الجهاز!`);
+
+          // Clean URL without refreshing to prevent duplicate toasts
+          if (window.history.replaceState) {
+            const cleanUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, cleanUrl);
+          }
+        }
+      }
+    };
+
+    handleUrlImport();
+    window.addEventListener('hashchange', handleUrlImport);
+    return () => window.removeEventListener('hashchange', handleUrlImport);
+  }, []);
+
   // Initialize Teacher Role & Subscribe to live room updates
   useEffect(() => {
     whiteboardSyncService.initRole('teacher', roomCode);

@@ -408,6 +408,188 @@ class DrawingEngineService {
   public getDrawingById(id: string): DrawingItem | undefined {
     return this.getAllDrawings().find(d => d.id === id);
   }
+
+  /**
+   * ==============================================================
+   * MULTI-DEVICE SHARING, EXPORT/IMPORT & GITHUB VERCEL INTEGRATION
+   * ==============================================================
+   */
+
+  /**
+   * UTF-8 safe Base64 encoder for Arabic text & SVG markup
+   */
+  public encodeLessonToSharePayload(item: DrawingItem): string {
+    const minified: Partial<DrawingItem> = {
+      id: item.id,
+      title: item.title,
+      titleEn: item.titleEn,
+      category: item.category,
+      description: item.description,
+      imageUrl: item.imageUrl,
+      mode: item.mode,
+      opacity: item.opacity,
+      tolerance: item.tolerance,
+      targetAccuracy: item.targetAccuracy,
+      points: item.points,
+      arabicAudioText: item.arabicAudioText,
+      guideColor: item.guideColor,
+      steps: item.steps,
+      enableStepsGuide: item.enableStepsGuide,
+      isCustom: true
+    };
+    const jsonStr = JSON.stringify(minified);
+    return window.btoa(
+      encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, (_, p1) =>
+        String.fromCharCode(parseInt(p1, 16))
+      )
+    );
+  }
+
+  /**
+   * UTF-8 safe Base64 decoder
+   */
+  public decodeLessonFromSharePayload(raw: string): DrawingItem | null {
+    try {
+      const cleaned = raw.trim();
+      const jsonStr = decodeURIComponent(
+        Array.prototype.map
+          .call(window.atob(cleaned), (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      const parsed = JSON.parse(jsonStr);
+      if (parsed && typeof parsed.title === 'string' && (parsed.imageUrl || parsed.steps)) {
+        return {
+          id: parsed.id || 'shared_draw_' + Date.now(),
+          title: parsed.title,
+          titleEn: parsed.titleEn || parsed.title,
+          category: parsed.category || 'letters',
+          description: parsed.description,
+          imageUrl: parsed.imageUrl,
+          mode: parsed.mode || 'trace',
+          opacity: parsed.opacity ?? 0.25,
+          tolerance: parsed.tolerance || 'normal',
+          targetAccuracy: parsed.targetAccuracy || 70,
+          points: parsed.points || 100,
+          arabicAudioText: parsed.arabicAudioText || parsed.title,
+          guideColor: parsed.guideColor || 'yellow',
+          isCustom: true,
+          steps: Array.isArray(parsed.steps) ? parsed.steps : undefined,
+          enableStepsGuide: parsed.enableStepsGuide ?? (Array.isArray(parsed.steps) && parsed.steps.length > 0)
+        };
+      }
+      return null;
+    } catch (e) {
+      console.error('Failed to decode shared lesson:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Build full URL for sharing a lesson to any mobile, tablet, or PC
+   */
+  public getShareUrlForLesson(item: DrawingItem): string {
+    const payload = this.encodeLessonToSharePayload(item);
+    const origin = window.location.origin;
+    const pathname = window.location.pathname;
+    return `${origin}${pathname}#lesson=${payload}`;
+  }
+
+  /**
+   * Export all custom lessons and overrides as downloadable JSON
+   */
+  public exportAllDrawingsJson(): string {
+    const custom = this.getCustomDrawings();
+    const overrides = this.getPresetOverrides();
+    const backup = {
+      app: 'BaseeraInteractiveDrawingStudio',
+      version: '2.0',
+      exportedAt: new Date().toISOString(),
+      customDrawings: custom,
+      presetOverrides: overrides
+    };
+    return JSON.stringify(backup, null, 2);
+  }
+
+  /**
+   * Import lessons from JSON string (from file or paste)
+   */
+  public importDrawingsFromJson(jsonString: string): { importedCount: number; errors: string[] } {
+    const errors: string[] = [];
+    let count = 0;
+    try {
+      const data = JSON.parse(jsonString);
+      // Support both full backup object or direct array
+      const items: DrawingItem[] = Array.isArray(data)
+        ? data
+        : Array.isArray(data.customDrawings)
+        ? data.customDrawings
+        : [];
+
+      if (items.length === 0) {
+        errors.push('لم يتم العثور على أي دروس صالحة في الملف.');
+        return { importedCount: 0, errors };
+      }
+
+      for (const item of items) {
+        if (item && item.title && item.imageUrl) {
+          const validItem: DrawingItem = {
+            ...item,
+            id: item.id || 'imported_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+            isCustom: true
+          };
+          this.saveCustomDrawing(validItem);
+          count++;
+        }
+      }
+
+      // Also import preset overrides if available
+      if (data.presetOverrides && typeof data.presetOverrides === 'object') {
+        const currentOverrides = this.getPresetOverrides();
+        Object.assign(currentOverrides, data.presetOverrides);
+        localStorage.setItem('baseera_preset_overrides', JSON.stringify(currentOverrides));
+      }
+
+      return { importedCount: count, errors };
+    } catch (err: any) {
+      errors.push('صيغة الملف غير صالحة: ' + (err.message || 'خطأ في قراءة JSON'));
+      return { importedCount: 0, errors };
+    }
+  }
+
+  /**
+   * Generate permanent TypeScript code to paste directly into src/data/drawingData.ts
+   * So when pushed to GitHub, Vercel permanently serves these lessons on all devices worldwide!
+   */
+  public generateTypeScriptCodeForGitHub(): string {
+    const custom = this.getCustomDrawings();
+    if (custom.length === 0) return '// لا توجد دروس مخصصة حالياً.';
+
+    const formatted = custom.map(item => {
+      return `  {
+    id: ${JSON.stringify(item.id)},
+    title: ${JSON.stringify(item.title)},
+    titleEn: ${JSON.stringify(item.titleEn || item.title)},
+    category: ${JSON.stringify(item.category)},
+    description: ${JSON.stringify(item.description || '')},
+    imageUrl: ${JSON.stringify(item.imageUrl)},
+    mode: ${JSON.stringify(item.mode)},
+    opacity: ${item.opacity || 0.25},
+    tolerance: ${JSON.stringify(item.tolerance || 'normal')},
+    targetAccuracy: ${item.targetAccuracy || 70},
+    points: ${item.points || 100},
+    arabicAudioText: ${JSON.stringify(item.arabicAudioText || item.title)},
+    guideColor: ${JSON.stringify(item.guideColor || 'yellow')},
+    enableStepsGuide: ${item.enableStepsGuide ? 'true' : 'false'},
+    steps: ${item.steps ? JSON.stringify(item.steps, null, 6) : 'undefined'}
+  }`;
+    }).join(',\n');
+
+    return `// انسخ هذا الكود وألصقه داخل مصفوفة DEFAULT_DRAWINGS في ملف src/data/drawingData.ts
+// ثم ارفع التغييرات إلى مستودع GitHub (git add . && git commit -m "Add new lessons" && git push)
+// وسيقوم موقع Vercel ببنائها فوراً لتصبح دروساً رسمية لجميع الطلاب والأجهزة تلقائياً:
+
+${formatted}`;
+  }
 }
 
 export const drawingEngineService = new DrawingEngineService();

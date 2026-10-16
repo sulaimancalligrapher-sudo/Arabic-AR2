@@ -110,8 +110,12 @@ class HandTrackingService {
   private lightLevel: 'dark' | 'good' | 'bright' = 'good';
   private isPaused: boolean = false;
 
-  // Brightness filter level (1.0 = normal, 1.5 = boosted, 2.0 = extra bright, 2.5 = max)
-  private brightnessMultiplier: number = 1.5;
+  // Brightness filter level (1.05 = natural realistic, calibrated with contrast 1.1 and saturate 1.2)
+  private brightnessMultiplier: number = 1.05;
+
+  // Dedicated offscreen downscaled buffer for MediaPipe AI (separates Full HD display from lightweight AI inference)
+  private aiCanvas: HTMLCanvasElement | null = null;
+  private aiCtx: CanvasRenderingContext2D | null = null;
 
   private latestData: HandData = {
     indexTip: null,
@@ -241,7 +245,7 @@ class HandTrackingService {
   public setBrightnessMultiplier(val: number) {
     this.brightnessMultiplier = val;
     if (this.videoElement) {
-      this.videoElement.style.filter = `brightness(${val}) contrast(1.15) saturate(1.15)`;
+      this.videoElement.style.filter = `brightness(${val}) contrast(1.1) saturate(1.2)`;
     }
   }
 
@@ -281,8 +285,8 @@ class HandTrackingService {
         (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1) ||
         window.innerWidth <= 840);
 
-    // Apply brightness enhancement filter to video immediately
-    this.videoElement.style.filter = `brightness(${this.brightnessMultiplier}) contrast(1.15) saturate(1.15)`;
+    // Apply natural realistic calibration filter to video immediately (contrast 1.1, saturate 1.2, brightness 1.05)
+    this.videoElement.style.filter = `brightness(${this.brightnessMultiplier}) contrast(1.1) saturate(1.2)`;
 
     try {
       // 1. Ensure library is loaded
@@ -311,13 +315,13 @@ class HandTrackingService {
         this.hands.onResults((results: any) => this.processResults(results));
       }
 
-      // 3. Direct camera capture with adaptive orientation constraints (supports seamless horizontal/vertical rotation):
+      // 3. Direct camera capture: Request Full HD display video feed for crystal-clear video quality
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: 'user',
-          width: { ideal: 1280, min: 480 },
-          height: { ideal: 720, min: 360 },
-          frameRate: { ideal: 30, max: 30 }
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
+          frameRate: { ideal: 30, max: 60 }
         },
         audio: false
       };
@@ -387,9 +391,31 @@ class HandTrackingService {
           lastProcessedTime = now;
           try {
             this.updateFps();
-            // Direct GPU texture upload from video element into MediaPipe WebGL WASM:
-            // Avoids slow CPU drawImage and avoids memory allocations!
-            await this.hands.send({ image: this.videoElement });
+
+            // SEPARATION OF DISPLAY & AI RESOLUTION:
+            // Display: Full HD camera video rendered in full clarity for the student.
+            // AI: Downscaled to lightweight offscreen buffer (~384px) for blazing-fast 60 FPS inference with low memory.
+            const vw = this.videoElement.videoWidth || 1280;
+            const vh = this.videoElement.videoHeight || 720;
+            const aiW = 384;
+            const aiH = Math.round(aiW * (vh / vw)) || 288;
+
+            if (!this.aiCanvas) {
+              this.aiCanvas = document.createElement('canvas');
+              this.aiCanvas.width = aiW;
+              this.aiCanvas.height = aiH;
+              this.aiCtx = this.aiCanvas.getContext('2d', { willReadFrequently: false, alpha: false });
+            } else if (this.aiCanvas.width !== aiW || this.aiCanvas.height !== aiH) {
+              this.aiCanvas.width = aiW;
+              this.aiCanvas.height = aiH;
+            }
+
+            if (this.aiCtx && this.aiCanvas) {
+              this.aiCtx.drawImage(this.videoElement, 0, 0, aiW, aiH);
+              await this.hands.send({ image: this.aiCanvas });
+            } else {
+              await this.hands.send({ image: this.videoElement });
+            }
           } catch {
             // Ignore transient frame send error
           } finally {
