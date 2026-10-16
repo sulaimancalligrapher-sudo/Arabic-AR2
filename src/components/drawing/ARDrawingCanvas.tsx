@@ -1575,10 +1575,12 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             onLoadedMetadata={handleVideoLoadedMetadata}
             onResize={handleVideoLoadedMetadata}
             className={`absolute inset-0 w-full h-full object-contain -scale-x-100 transition-opacity duration-300 pointer-events-none ${
-              inputMode === 'ar_hand' && showVideoFeed ? 'opacity-90' : 'opacity-0'
+              inputMode === 'ar_hand' && showVideoFeed ? 'opacity-100' : 'opacity-0'
             }`}
             style={{
-              filter: `brightness(${brightness}) contrast(1.1) saturate(1.2)`
+              filter: `brightness(${brightness}) contrast(1.1) saturate(1.2)`,
+              imageRendering: '-webkit-optimize-contrast' as any,
+              transform: 'scaleX(-1) translateZ(0)'
             }}
           />
 

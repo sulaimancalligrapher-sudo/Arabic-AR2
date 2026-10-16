@@ -315,18 +315,123 @@ class HandTrackingService {
         this.hands.onResults((results: any) => this.processResults(results));
       }
 
-      // 3. Direct camera capture: Request Full HD display video feed for crystal-clear video quality
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: 'user',
-          width: { ideal: 1920, min: 1280 },
-          height: { ideal: 1080, min: 720 },
-          frameRate: { ideal: 30, max: 60 }
-        },
-        audio: false
-      };
+      // 3. Direct camera capture: Request Highest Supported Full HD resolution for crystal-clear PC webcam video
+      let stream: MediaStream | null = null;
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Desktop PC Webcams: Must NOT require facingMode (which breaks USB webcams) nor strict frameRate mins
+      const pcResolutionTiers: MediaTrackConstraints[] = [
+        // Tier 1: Crisp Full HD (1920x1080 @ 60/30fps widescreen 16:9)
+        {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          aspectRatio: { ideal: 16 / 9 },
+          frameRate: { ideal: 60 }
+        },
+        // Tier 2: HD 720p (1280x720 widescreen 16:9)
+        {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          aspectRatio: { ideal: 16 / 9 },
+          frameRate: { ideal: 30 }
+        },
+        // Tier 3: High resolution general PC capture
+        {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        // Tier 4: Medium HD
+        {
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        // Tier 5: Soft user-facing hint
+        {
+          facingMode: { ideal: 'user' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      ];
+
+      // Mobile / Tablet: Front camera preferred
+      const mobileResolutionTiers: MediaTrackConstraints[] = [
+        {
+          facingMode: { ideal: 'user' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 }
+        },
+        {
+          facingMode: { ideal: 'user' },
+          width: { ideal: 960 },
+          height: { ideal: 540 }
+        },
+        {
+          facingMode: { ideal: 'user' }
+        }
+      ];
+
+      const tiersToProbe = this.isMobileOrTablet ? mobileResolutionTiers : pcResolutionTiers;
+
+      for (const res of tiersToProbe) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video: res, audio: false });
+          if (stream) break;
+        } catch {
+          // Continue probing next resolution tier
+        }
+      }
+
+      // If primary probe did not yield a stream, try secondary tiers
+      if (!stream) {
+        const fallbackTiers = this.isMobileOrTablet ? pcResolutionTiers : mobileResolutionTiers;
+        for (const res of fallbackTiers) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: res, audio: false });
+            if (stream) break;
+          } catch {
+            // continue
+          }
+        }
+      }
+
+      // Universal final fallback with dimension request
+      if (!stream) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+            audio: false
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
+      }
+
+      // Dynamically maximize PC webcam hardware resolution if capabilities are supported
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        try {
+          const settings = videoTrack.getSettings ? videoTrack.getSettings() : {};
+          const currentW = settings.width || 0;
+          const currentH = settings.height || 0;
+
+          const caps = (videoTrack as any).getCapabilities ? (videoTrack as any).getCapabilities() : null;
+          if (caps && caps.width && caps.height) {
+            const maxWidth = caps.width.max || 1920;
+            const maxHeight = caps.height.max || 1080;
+            const maxFps = caps.frameRate?.max || 60;
+            if (maxWidth > currentW || maxHeight > currentH) {
+              await videoTrack.applyConstraints({
+                width: { ideal: Math.min(maxWidth, 1920) },
+                height: { ideal: Math.min(maxHeight, 1080) },
+                aspectRatio: { ideal: 16 / 9 },
+                frameRate: { ideal: Math.min(60, maxFps) }
+              });
+            }
+          }
+        } catch {
+          // Ignore if driver doesn't support dynamic re-application
+        }
+      }
 
       this.videoElement.srcObject = stream;
       this.videoElement.setAttribute('playsinline', 'true');
@@ -345,8 +450,8 @@ class HandTrackingService {
 
       const updateDims = () => {
         if (!this.videoElement) return;
-        const vWidth = this.videoElement.videoWidth || (this.isMobileOrTablet ? 640 : 1280);
-        const vHeight = this.videoElement.videoHeight || (this.isMobileOrTablet ? 480 : 720);
+        const vWidth = this.videoElement.videoWidth || (this.isMobileOrTablet ? 640 : 1920);
+        const vHeight = this.videoElement.videoHeight || (this.isMobileOrTablet ? 480 : 1080);
         this.videoDimensions = {
           width: vWidth,
           height: vHeight,

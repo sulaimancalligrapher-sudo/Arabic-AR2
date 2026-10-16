@@ -34,8 +34,10 @@ import {
   FileUp,
   Smartphone,
   Globe,
-  CheckCheck
+  CheckCheck,
+  Code
 } from 'lucide-react';
+import QRCode from 'qrcode';
 
 interface DrawingAdminModalProps {
   isOpen: boolean;
@@ -58,6 +60,12 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
   const [shareSelectedDrawing, setShareSelectedDrawing] = useState<DrawingItem | null>(null);
   const [copiedShareUrl, setCopiedShareUrl] = useState(false);
   const [githubCodeCopied, setGithubCodeCopied] = useState(false);
+  const [fileDownloaded, setFileDownloaded] = useState(false);
+  const [showCodeBox, setShowCodeBox] = useState(false);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+  const [qrCodeTooLarge, setQrCodeTooLarge] = useState<boolean>(false);
+  const [copyFeedbackMsg, setCopyFeedbackMsg] = useState<string | null>(null);
+  const codeTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [importResult, setImportResult] = useState<{ success: boolean; message: string } | null>(null);
   const jsonFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -266,6 +274,48 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
     }
   }, [isOpen, initialEditingDrawingId]);
 
+  // Generate QR Code locally and reliably without external network dependencies
+  useEffect(() => {
+    if (activeTab === 'multi_device') {
+      const targetItem = shareSelectedDrawing || customList[0] || allDrawingsList[0];
+      if (!targetItem) {
+        setQrCodeDataUrl(null);
+        setQrCodeTooLarge(false);
+        return;
+      }
+      try {
+        const shareUrl = drawingEngineService.getShareUrlForLesson(targetItem);
+        // QR Code physical maximum in binary mode is ~2900 bytes. If URL is very long, warn gracefully.
+        if (shareUrl.length > 2400) {
+          setQrCodeDataUrl(null);
+          setQrCodeTooLarge(true);
+        } else {
+          setQrCodeTooLarge(false);
+          QRCode.toDataURL(shareUrl, {
+            width: 240,
+            margin: 1,
+            color: {
+              dark: '#020617',
+              light: '#ffffff'
+            },
+            errorCorrectionLevel: 'L'
+          })
+            .then((dataUrl) => {
+              setQrCodeDataUrl(dataUrl);
+              setQrCodeTooLarge(false);
+            })
+            .catch(() => {
+              setQrCodeDataUrl(null);
+              setQrCodeTooLarge(true);
+            });
+        }
+      } catch {
+        setQrCodeDataUrl(null);
+        setQrCodeTooLarge(true);
+      }
+    }
+  }, [activeTab, shareSelectedDrawing, customList, allDrawingsList]);
+
   const handleCancelEdit = () => {
     resetForm();
     setActiveTab('manage');
@@ -375,9 +425,26 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
   const handleCopyShareUrl = (item: DrawingItem) => {
     try {
       const url = drawingEngineService.getShareUrlForLesson(item);
-      navigator.clipboard.writeText(url);
-      setCopiedShareUrl(true);
-      setTimeout(() => setCopiedShareUrl(false), 2500);
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(url)
+          .then(() => {
+            setCopiedShareUrl(true);
+            setTimeout(() => setCopiedShareUrl(false), 2500);
+          })
+          .catch(() => {
+            const ok = fallbackCopyText(url);
+            if (ok) {
+              setCopiedShareUrl(true);
+              setTimeout(() => setCopiedShareUrl(false), 2500);
+            }
+          });
+      } else {
+        const ok = fallbackCopyText(url);
+        if (ok) {
+          setCopiedShareUrl(true);
+          setTimeout(() => setCopiedShareUrl(false), 2500);
+        }
+      }
     } catch (err: any) {
       console.error(err);
     }
@@ -423,14 +490,112 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
     e.target.value = '';
   };
 
+  const fallbackCopyText = (text: string): boolean => {
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      // Must stay in viewport to prevent browser security blocks, but visually invisible
+      textArea.style.position = 'fixed';
+      textArea.style.top = '0';
+      textArea.style.left = '0';
+      textArea.style.width = '2em';
+      textArea.style.height = '2em';
+      textArea.style.padding = '0';
+      textArea.style.border = 'none';
+      textArea.style.outline = 'none';
+      textArea.style.boxShadow = 'none';
+      textArea.style.background = 'transparent';
+      textArea.style.opacity = '0.01';
+      textArea.style.zIndex = '-1';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      textArea.setSelectionRange(0, text.length);
+      const success = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return success;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleDownloadDrawingDataFile = () => {
+    try {
+      const fileContent = drawingEngineService.generateFullDrawingDataTsFile();
+      const blob = new Blob([fileContent], { type: 'text/typescript;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'drawingData.ts';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setFileDownloaded(true);
+      setCopyFeedbackMsg('✅ تم تنزيل ملف drawingData.ts بنجاح إلى مجلد التنزيلات!');
+      setTimeout(() => {
+        setFileDownloaded(false);
+        setCopyFeedbackMsg(null);
+      }, 5000);
+    } catch (e: any) {
+      alert('حدث خطأ أثناء تنزيل الملف: ' + (e?.message || 'خطأ غير معروف'));
+    }
+  };
+
   const handleCopyGitHubCode = () => {
     try {
-      const code = drawingEngineService.generateTypeScriptCodeForGitHub();
-      navigator.clipboard.writeText(code);
-      setGithubCodeCopied(true);
-      setTimeout(() => setGithubCodeCopied(false), 3000);
-    } catch (err: any) {
-      console.error(err);
+      const code = drawingEngineService.generateFullDrawingDataTsFile();
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(code)
+          .then(() => {
+            setGithubCodeCopied(true);
+            setCopyFeedbackMsg('✅ تم نسخ الكود كاملاً بنجاح إلى الحافظة!');
+            setTimeout(() => {
+              setGithubCodeCopied(false);
+              setCopyFeedbackMsg(null);
+            }, 3500);
+          })
+          .catch(() => {
+            const ok = fallbackCopyText(code);
+            if (ok) {
+              setGithubCodeCopied(true);
+              setCopyFeedbackMsg('✅ تم نسخ الكود كاملاً بنجاح إلى الحافظة!');
+              setTimeout(() => {
+                setGithubCodeCopied(false);
+                setCopyFeedbackMsg(null);
+              }, 3500);
+            } else {
+              setShowCodeBox(true);
+              setCopyFeedbackMsg('📋 تم فتح الكود وتحديده أدناه تلقائياً، اضغط Ctrl + C للنسخ!');
+              setTimeout(() => handleSelectAllCode(), 100);
+            }
+          });
+      } else {
+        const ok = fallbackCopyText(code);
+        if (ok) {
+          setGithubCodeCopied(true);
+          setCopyFeedbackMsg('✅ تم نسخ الكود كاملاً بنجاح إلى الحافظة!');
+          setTimeout(() => {
+            setGithubCodeCopied(false);
+            setCopyFeedbackMsg(null);
+          }, 3500);
+        } else {
+          setShowCodeBox(true);
+          setCopyFeedbackMsg('📋 تم فتح الكود وتحديده أدناه تلقائياً، اضغط Ctrl + C للنسخ!');
+          setTimeout(() => handleSelectAllCode(), 100);
+        }
+      }
+    } catch {
+      setShowCodeBox(true);
+      setCopyFeedbackMsg('📋 تم فتح الكود وتحديده أدناه تلقائياً، اضغط Ctrl + C للنسخ!');
+      setTimeout(() => handleSelectAllCode(), 100);
+    }
+  };
+
+  const handleSelectAllCode = () => {
+    if (codeTextareaRef.current) {
+      codeTextareaRef.current.focus();
+      codeTextareaRef.current.select();
     }
   };
 
@@ -1641,18 +1806,36 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
                         </p>
                       </div>
 
-                      {/* Right Col: Instant QR Code */}
-                      <div className="flex flex-col items-center justify-center p-3 bg-white rounded-2xl shadow-lg border border-slate-700 text-center">
-                        <img
-                          src={qrApiUrl}
-                          alt="QR Code"
-                          className="w-36 h-36 object-contain"
-                          loading="lazy"
-                        />
-                        <div className="text-[10px] font-bold text-slate-900 mt-1 flex items-center gap-1">
-                          <QrCode className="w-3 h-3 text-sky-600" />
-                          <span>امسح بكاميرا الجوال / التابلت</span>
-                        </div>
+                      {/* Right Col: Local Instant QR Code (Generated Client-Side Offline) */}
+                      <div className="flex flex-col items-center justify-center p-3 bg-white rounded-2xl shadow-lg border border-slate-700 text-center min-h-[170px]">
+                        {qrCodeDataUrl ? (
+                          <>
+                            <img
+                              src={qrCodeDataUrl}
+                              alt="QR Code"
+                              className="w-36 h-36 object-contain"
+                            />
+                            <div className="text-[10px] font-bold text-slate-900 mt-1 flex items-center gap-1">
+                              <QrCode className="w-3 h-3 text-sky-600" />
+                              <span>امسح بكاميرا الجوال / التابلت</span>
+                            </div>
+                          </>
+                        ) : qrCodeTooLarge ? (
+                          <div className="p-2 space-y-1.5 text-center text-slate-700">
+                            <QrCode className="w-8 h-8 text-amber-500 mx-auto" />
+                            <div className="text-[11px] font-bold text-slate-900">
+                              تفاصيل الدرس تتجاوز سعة QR
+                            </div>
+                            <p className="text-[10px] text-slate-600 leading-tight">
+                              بيانات ورسمة هذا الدرس دقيقة ومفصلة. استخدم زر <strong>«نسخ الرابط 📋»</strong> للمشاركة عبر واتساب، أو <strong>«الحل الأنسب»</strong> أدناه.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-500 flex items-center gap-1.5 py-8">
+                            <span className="animate-spin text-base">⏳</span>
+                            <span>جارٍ تجهيز الرمز...</span>
+                          </div>
+                        )}
                       </div>
 
                     </div>
@@ -1719,60 +1902,128 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
               </div>
 
               {/* Solution 3: Permanent Integration into GitHub & Vercel */}
-              <div className="p-5 rounded-3xl bg-slate-800/80 border border-slate-700 space-y-3.5 shadow-xl">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                      <Globe className="w-4 h-4" />
+              <div className="p-5 rounded-3xl bg-slate-800/90 border-2 border-emerald-500/40 space-y-4 shadow-2xl">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                      <Globe className="w-5 h-5" />
                     </div>
                     <div>
-                      <h4 className="text-sm font-bold text-white font-serif">
-                        الطريقة الثالثة: تثبيت الدروس في كود المشروع لـ GitHub و Vercel (دائم للجميع)
+                      <h4 className="text-sm font-bold text-white font-serif flex items-center gap-2">
+                        <span>الحل الأنسب: تثبيت الدروس في كود المشروع لـ GitHub و Vercel</span>
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-sans font-bold">
+                          مرة واحدة وتظهر للجميع 🌟
+                        </span>
                       </h4>
-                      <p className="text-[11px] text-slate-400">
-                        تضمين الدروس مباشرة في كود المصدر ليصبح جزءاً رسمياً من موقع Vercel يظهر تلقائياً لأي جهاز في العالم!
+                      <p className="text-[11px] text-slate-300">
+                        تضمين الدروس مباشرة في كود المشروع لتصبح جزءاً رسمياً ثابتاً من موقع Vercel يظهر تلقائياً لأي جوال أو تابلت!
                       </p>
                     </div>
                   </div>
+                </div>
 
+                {/* Instant Feedback Message Banner */}
+                {copyFeedbackMsg && (
+                  <div className="p-3.5 rounded-2xl bg-emerald-950/90 border border-emerald-400 text-emerald-200 text-xs font-bold flex items-center gap-2.5 animate-in fade-in shadow-xl">
+                    <CheckCheck className="w-4 h-4 text-emerald-300 shrink-0" />
+                    <span className="leading-relaxed">{copyFeedbackMsg}</span>
+                  </div>
+                )}
+
+                {/* Primary Action Buttons: Download File & Copy Code */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-1">
+                  {/* Direct File Download Button (Requested by User) */}
+                  <button
+                    type="button"
+                    onClick={handleDownloadDrawingDataFile}
+                    className="flex-1 px-5 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 shadow-xl shadow-emerald-500/25 transition-all cursor-pointer active:scale-95 border border-emerald-300/40"
+                  >
+                    <Download className="w-5 h-5 shrink-0" />
+                    <span>{fileDownloaded ? '✅ تم تنزيل drawingData.ts بنجاح!' : 'تنزيل ملف drawingData.ts كاملاً وجاهزاً (Download) 📥'}</span>
+                  </button>
+
+                  {/* Fallback Copy Button with Bulletproof Fallback */}
                   <button
                     type="button"
                     onClick={handleCopyGitHubCode}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    className={`px-4 py-3.5 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer border ${
                       githubCodeCopied
-                        ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 ring-2 ring-emerald-400'
-                        : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md font-black'
+                        ? 'bg-emerald-600 border-emerald-400 text-white shadow-lg ring-2 ring-emerald-400/40'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-700'
                     }`}
                   >
                     {githubCodeCopied ? (
                       <>
-                        <CheckCheck className="w-4 h-4" />
-                        <span>تم نسخ الكود بنجاح! ✓</span>
+                        <CheckCheck className="w-4 h-4 text-emerald-300" />
+                        <span>تم نسخ الكود! ✓</span>
                       </>
                     ) : (
                       <>
-                        <Copy className="w-4 h-4" />
-                        <span>نسخ كود TypeScript للمشروع 📋</span>
+                        <Copy className="w-4 h-4 text-amber-400" />
+                        <span>نسخ الكود بالكامل 📋</span>
                       </>
                     )}
                   </button>
+
+                  {/* Toggle Visible Code Viewer */}
+                  <button
+                    type="button"
+                    onClick={() => setShowCodeBox(!showCodeBox)}
+                    className="px-3.5 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Code className="w-4 h-4 text-sky-400" />
+                    <span>{showCodeBox ? 'إخفاء محتوى الكود' : 'معاينة محتوى الكود 🔍'}</span>
+                  </button>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-slate-300 space-y-2 text-xs">
-                  <div className="font-bold text-amber-300">طريقة التطبيق في 3 خطوات بسيطة:</div>
-                  <ol className="list-decimal list-inside space-y-1.5 text-slate-300 leading-relaxed text-[11px]">
-                    <li>انقر على زر <strong>«نسخ كود TypeScript للمشروع»</strong> بالأعلى.</li>
-                    <li>افتح الملف <code className="text-amber-400 font-mono">src/data/drawingData.ts</code> في محرر الأكواد (أو عبر مستودع GitHub)، وألصق الكود المنسوخ داخل مصفوفة <code className="text-amber-400 font-mono">DEFAULT_DRAWINGS</code>.</li>
+                {/* Visible Code Viewer Box (If toggled or copy fallback) */}
+                {showCodeBox && (
+                  <div className="space-y-2 p-3 bg-slate-950 rounded-2xl border border-slate-800 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span className="font-mono text-emerald-400">محتوى ملف: src/data/drawingData.ts</span>
+                      <button
+                        type="button"
+                        onClick={handleSelectAllCode}
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-bold cursor-pointer"
+                      >
+                        تحديد الكل (Select All)
+                      </button>
+                    </div>
+                    <textarea
+                      ref={codeTextareaRef}
+                      readOnly
+                      rows={8}
+                      value={drawingEngineService.generateFullDrawingDataTsFile()}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-[11px] font-mono text-slate-300 select-all focus:outline-none"
+                    />
+                  </div>
+                )}
+
+                {/* Super Easy 2-Step Application Guide */}
+                <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 text-slate-300 space-y-2.5 text-xs">
+                  <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                    <span>💡 كيف تطبق هذا التعديل في دقيقة واحدة؟</span>
+                  </div>
+                  <ol className="list-decimal list-inside space-y-2 text-slate-300 leading-relaxed text-[11px]">
                     <li>
-                      ارفع التعديل إلى GitHub:
+                      انقر على زر <strong>«تنزيل ملف drawingData.ts كاملاً وجاهزاً 📥»</strong> ليتم حفظ الملف في جهازك.
+                    </li>
+                    <li>
+                      انسخ الملف الذي تم تنزيله واستبدله بالملف الموجود في مجلد مشروعك في المسار:
+                      <code className="text-amber-400 font-mono bg-slate-900 px-2 py-0.5 rounded mr-1 inline-block mt-1">
+                        src/data/drawingData.ts
+                      </code>
+                    </li>
+                    <li>
+                      ارفع التحديث إلى مستودع GitHub بالأمر:
                       <div className="mt-1 p-2 rounded-lg bg-slate-900 border border-slate-800 font-mono text-[10px] text-emerald-400 select-all">
-                        git add src/data/drawingData.ts && git commit -m "إضافة الدروس المخصصة" && git push
+                        git add src/data/drawingData.ts && git commit -m "تحديث دروس الرسم والنقاط" && git push
                       </div>
                     </li>
                   </ol>
-                  <p className="text-[10px] text-slate-400 pt-1">
-                    🚀 سيقوم موقع Vercel بإعادة البناء خلال ثوانٍ، وتظهر جميع الدروس ونقاطها الجديدة على الهواتف والأجهزة تلقائياً دون الحاجة لأي روابط مشاركة!
-                  </p>
+                  <div className="text-[11px] text-emerald-300/90 pt-1 font-semibold flex items-center gap-1.5">
+                    <span>🚀 بمجرد رفع التحديث، سيقوم موقع Vercel ببنائه تلقائياً خلال ثوانٍ، وتظهر جميع الدروس الجديدة ونقاطها لكل من يفتح الرابط على الجوال والتابلت فوراً دون الحاجة لأي روابط مشاركة!</span>
+                  </div>
                 </div>
               </div>
 

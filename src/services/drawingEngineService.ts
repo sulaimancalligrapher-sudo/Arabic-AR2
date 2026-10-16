@@ -557,38 +557,60 @@ class DrawingEngineService {
   }
 
   /**
-   * Generate permanent TypeScript code to paste directly into src/data/drawingData.ts
-   * So when pushed to GitHub, Vercel permanently serves these lessons on all devices worldwide!
+   * Generates the entire ready-to-use src/data/drawingData.ts file
+   * containing ALL current custom drawings, modified presets, and default lessons.
    */
-  public generateTypeScriptCodeForGitHub(): string {
-    const custom = this.getCustomDrawings();
-    if (custom.length === 0) return '// لا توجد دروس مخصصة حالياً.';
+  public generateFullDrawingDataTsFile(): string {
+    const all = this.getAllDrawings();
 
-    const formatted = custom.map(item => {
+    const itemsFormatted = all.map((item) => {
+      const stepsCode = item.steps && item.steps.length > 0
+        ? `\n    steps: ${JSON.stringify(item.steps, null, 6).replace(/\n/g, '\n    ')},`
+        : '';
+
       return `  {
     id: ${JSON.stringify(item.id)},
     title: ${JSON.stringify(item.title)},
     titleEn: ${JSON.stringify(item.titleEn || item.title)},
-    category: ${JSON.stringify(item.category)},
+    category: ${JSON.stringify(item.category || 'letters')},
     description: ${JSON.stringify(item.description || '')},
     imageUrl: ${JSON.stringify(item.imageUrl)},
-    mode: ${JSON.stringify(item.mode)},
-    opacity: ${item.opacity || 0.25},
+    mode: ${JSON.stringify(item.mode || 'trace')},
+    opacity: ${item.opacity ?? 0.25},
     tolerance: ${JSON.stringify(item.tolerance || 'normal')},
     targetAccuracy: ${item.targetAccuracy || 70},
     points: ${item.points || 100},
     arabicAudioText: ${JSON.stringify(item.arabicAudioText || item.title)},
     guideColor: ${JSON.stringify(item.guideColor || 'yellow')},
-    enableStepsGuide: ${item.enableStepsGuide ? 'true' : 'false'},
-    steps: ${item.steps ? JSON.stringify(item.steps, null, 6) : 'undefined'}
+    enableStepsGuide: ${item.enableStepsGuide ? 'true' : 'false'},${stepsCode}
+    isCustom: ${item.isCustom ? 'true' : 'false'}
   }`;
     }).join(',\n');
 
-    return `// انسخ هذا الكود وألصقه داخل مصفوفة DEFAULT_DRAWINGS في ملف src/data/drawingData.ts
-// ثم ارفع التغييرات إلى مستودع GitHub (git add . && git commit -m "Add new lessons" && git push)
-// وسيقوم موقع Vercel ببنائها فوراً لتصبح دروساً رسمية لجميع الطلاب والأجهزة تلقائياً:
+    return `import { DrawingItem } from '../types';
 
-${formatted}`;
+/**
+ * =========================================================================
+ * ملف بيانات الدروس والرسومات الرسمي (Interactive Drawing Studio)
+ * مُولّد ومُحدّث آلياً ليشمل جميع الحروف والدروس الافتراضية والدروس المضافة والمعدلة
+ * لتعمل مباشرة على جميع الهواتف، الأجهزة اللوحية (التابلت)، والكمبيوتر عند النشر عبر Vercel.
+ * =========================================================================
+ */
+
+export const PRESET_DRAWINGS: DrawingItem[] = [
+${itemsFormatted}
+];
+
+export const DEFAULT_DRAWINGS: DrawingItem[] = PRESET_DRAWINGS;
+`;
+  }
+
+  /**
+   * Generate permanent TypeScript code to paste directly into src/data/drawingData.ts
+   * So when pushed to GitHub, Vercel permanently serves these lessons on all devices worldwide!
+   */
+  public generateTypeScriptCodeForGitHub(): string {
+    return this.generateFullDrawingDataTsFile();
   }
 }
 
