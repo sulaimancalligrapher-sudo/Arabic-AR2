@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { DrawingItem } from '../../types';
 import { ConnectedStudent, whiteboardSyncService } from '../../services/whiteboardSyncService';
 import { GUIDE_LINE_COLORS } from '../../services/drawingEngineService';
@@ -24,7 +24,11 @@ import {
   Check,
   X,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  ChevronDown,
+  ChevronUp,
+  Search,
+  BookOpen
 } from 'lucide-react';
 
 interface TeacherLessonControlSectionProps {
@@ -76,6 +80,48 @@ export const TeacherLessonControlSection: React.FC<TeacherLessonControlSectionPr
   const [roomInput, setRoomInput] = useState(roomCode);
   const [copiedNote, setCopiedNote] = useState<string | null>(null);
   const [confirmEndLesson, setConfirmEndLesson] = useState(false);
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string>(allDrawings[0]?.id || '');
+  const [isLessonDropdownOpen, setIsLessonDropdownOpen] = useState(false);
+  const [lessonSearchQuery, setLessonSearchQuery] = useState('');
+  const [sendSuccessNote, setSendSuccessNote] = useState<string | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsLessonDropdownOpen(false);
+      }
+    };
+    if (isLessonDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isLessonDropdownOpen]);
+
+  const activeDrawing = allDrawings.find(d => d.id === selectedDrawingId) || allDrawings[0];
+
+  const filteredDrawings = allDrawings.filter(d => {
+    if (!lessonSearchQuery.trim()) return true;
+    const q = lessonSearchQuery.toLowerCase();
+    return (
+      d.title.toLowerCase().includes(q) ||
+      (d.titleEn && d.titleEn.toLowerCase().includes(q)) ||
+      (d.category && d.category.toLowerCase().includes(q))
+    );
+  });
+
+  const handleSendSelectedLesson = (drawingToSend?: DrawingItem) => {
+    const item = drawingToSend || activeDrawing;
+    if (!item) return;
+    onSendDrawingToWhiteboard(item, targetStudentId);
+    const targetText = targetStudentId === 'all'
+      ? `جميع الطلاب المتصلين (${connectedStudents.length})`
+      : connectedStudents.find(s => s.id === targetStudentId)?.name || 'الطالب المحدد';
+    setSendSuccessNote(`تم إرسال درس "${item.title}" بنجاح إلى ${targetText}! 📡`);
+    setTimeout(() => setSendSuccessNote(null), 3500);
+  };
 
   const getWhiteboardUrl = (drawingId?: string) => {
     return whiteboardSyncService.getWhiteboardUrl(drawingId, roomCode);
@@ -452,64 +498,240 @@ export const TeacherLessonControlSection: React.FC<TeacherLessonControlSectionPr
         )}
       </div>
 
-      {/* Broadcast Gallery: Send Any Drawing to Students */}
+      {/* Broadcast Gallery: Dropdown Selector for Direct Student Sending */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
           <div>
-            <h3 className="font-extrabold text-white text-base">
-              معرض الدروس للإرسال المباشر للطلاب 🎨
+            <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-amber-400" />
+              <span>معرض الدروس للإرسال المباشر للطلاب 🎨</span>
             </h3>
-            <p className="text-xs text-slate-400 font-medium">
-              انقر على أي حرف أو تمرين لإرساله فوراً لشاشات الطلاب المتصلين بالصف
+            <p className="text-xs text-slate-400 font-medium mt-0.5">
+              اختر الدرس من القائمة المنسدلة لإرساله فوراً لشاشات الطلاب المتصلين أو فتحه للشرح والتطبيق
             </p>
           </div>
-          <span className="text-xs font-bold text-amber-400 bg-amber-950/60 px-3 py-1 rounded-full border border-amber-500/30">
+          <span className="text-xs font-bold text-amber-400 bg-amber-950/60 px-3 py-1 rounded-full border border-amber-500/30 self-start sm:self-auto">
             {allDrawings.length} درس متاح
           </span>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-          {allDrawings.map((dr) => (
-            <div
-              key={dr.id}
-              className="bg-slate-950 border border-slate-800 hover:border-amber-500/50 rounded-2xl p-3 flex flex-col justify-between group transition-all"
-            >
-              <div className="aspect-square w-full rounded-xl bg-slate-900 p-2 mb-2 flex items-center justify-center">
-                <img
-                  src={dr.imageUrl}
-                  alt={dr.title}
-                  className="max-h-full max-w-full object-contain filter drop-shadow-sm group-hover:scale-105 transition-transform"
+        {/* Success Alert Banner on Send */}
+        {sendSuccessNote && (
+          <div className="p-3 rounded-2xl bg-emerald-950/90 border border-emerald-500 text-emerald-200 text-xs font-bold flex items-center gap-2 animate-in fade-in shadow-lg">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{sendSuccessNote}</span>
+          </div>
+        )}
+
+        {/* Dropdown Container */}
+        <div className="relative" ref={dropdownRef}>
+          {/* Dropdown Trigger Button */}
+          <button
+            type="button"
+            onClick={() => setIsLessonDropdownOpen(!isLessonDropdownOpen)}
+            className={`w-full bg-slate-950 border rounded-2xl p-3 flex items-center justify-between gap-3 text-right cursor-pointer transition-all shadow-md ${
+              isLessonDropdownOpen
+                ? 'border-amber-400 ring-2 ring-amber-400/20'
+                : 'border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            {activeDrawing ? (
+              <div className="flex items-center gap-3 min-w-0">
+                {/* Thumbnail with White Background */}
+                <div className="w-12 h-12 bg-white rounded-xl p-1 shadow-sm border border-slate-200 flex items-center justify-center shrink-0">
+                  <img
+                    src={activeDrawing.imageUrl}
+                    alt={activeDrawing.title}
+                    className="max-h-full max-w-full object-contain filter drop-shadow-xs"
+                  />
+                </div>
+                <div className="min-w-0 text-right">
+                  <div className="font-black text-white text-sm sm:text-base truncate flex items-center gap-2">
+                    <span>{activeDrawing.title}</span>
+                    {activeDrawing.steps && activeDrawing.steps.length > 0 && (
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono">
+                        {activeDrawing.steps.length} خطوات
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-400 font-mono truncate flex items-center gap-2 mt-0.5">
+                    <span>{activeDrawing.titleEn || 'Lesson'}</span>
+                    <span>•</span>
+                    <span className="text-amber-400/90 font-sans">{activeDrawing.category || 'خط عربي'}</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-slate-400 text-xs">اختر درساً من القائمة...</div>
+            )}
+
+            <div className="flex items-center gap-2 text-slate-400 shrink-0">
+              <span className="text-[11px] hidden sm:inline text-slate-400 font-medium">تغيير الدرس</span>
+              {isLessonDropdownOpen ? (
+                <ChevronUp className="w-5 h-5 text-amber-400 transition-transform" />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-slate-400 transition-transform" />
+              )}
+            </div>
+          </button>
+
+          {/* Dropdown Options Popup */}
+          {isLessonDropdownOpen && (
+            <div className="absolute z-40 top-full mt-2 left-0 right-0 bg-slate-900 border-2 border-slate-700 rounded-3xl shadow-2xl p-3 space-y-2.5 max-h-96 flex flex-col animate-in fade-in zoom-in-95 duration-150">
+              {/* Search in Dropdown */}
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={lessonSearchQuery}
+                  onChange={(e) => setLessonSearchQuery(e.target.value)}
+                  placeholder="ابحث بالحرف، الاسم، أو التصنيف..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 font-sans"
+                  autoFocus
                 />
               </div>
 
-              <div className="text-center mb-2">
-                <div className="font-bold text-white text-xs">{dr.title}</div>
-                <div className="text-[10px] text-slate-400 font-mono">{dr.titleEn}</div>
-              </div>
+              {/* Scrollable Lesson Items */}
+              <div className="overflow-y-auto space-y-1.5 pr-1 max-h-72 custom-scrollbar">
+                {filteredDrawings.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-slate-400">
+                    لا يوجد درس يطابق بحثك "{lessonSearchQuery}"
+                  </div>
+                ) : (
+                  filteredDrawings.map((dr) => {
+                    const isSelected = dr.id === activeDrawing?.id;
+                    return (
+                      <div
+                        key={dr.id}
+                        onClick={() => {
+                          setSelectedDrawingId(dr.id);
+                          setIsLessonDropdownOpen(false);
+                        }}
+                        className={`w-full p-2.5 rounded-2xl flex items-center justify-between gap-3 text-right transition-all cursor-pointer border ${
+                          isSelected
+                            ? 'bg-amber-500/15 border-amber-500/60 shadow-sm'
+                            : 'bg-slate-950/80 hover:bg-slate-800 border-slate-800/80 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          {/* Item Thumbnail on Crisp White Background */}
+                          <div className="w-11 h-11 bg-white rounded-xl p-1 shadow-sm border border-slate-200 flex items-center justify-center shrink-0">
+                            <img
+                              src={dr.imageUrl}
+                              alt={dr.title}
+                              className="max-h-full max-w-full object-contain filter drop-shadow-xs"
+                            />
+                          </div>
 
-              <div className="space-y-1.5 w-full">
-                {onSelectDrawing && (
-                  <button
-                    onClick={() => onSelectDrawing(dr)}
-                    className="w-full py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer shadow-sm"
-                    title="فتح سبورة الرسم التفاعلي للشرح والتجربة المباشرة"
-                  >
-                    <PenTool className="w-3 h-3" />
-                    <span>رسم وشرح 🎨</span>
-                  </button>
+                          {/* Data details */}
+                          <div className="min-w-0 text-right">
+                            <div className="font-bold text-white text-xs sm:text-sm truncate flex items-center gap-1.5">
+                              <span>{dr.title}</span>
+                              {dr.steps && dr.steps.length > 0 && (
+                                <span className="text-[10px] bg-slate-800 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.2 rounded font-mono">
+                                  {dr.steps.length} خطوات
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-400 font-mono truncate mt-0.5">
+                              <span>{dr.titleEn || ''}</span>
+                              {dr.category && (
+                                <>
+                                  <span className="mx-1">•</span>
+                                  <span className="text-amber-400/80 font-sans">{dr.category}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right / Status Indicator */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isSelected && (
+                            <span className="flex items-center gap-1 text-[11px] font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/30">
+                              <Check className="w-3.5 h-3.5" />
+                              <span>محدد</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
-
-                <button
-                  onClick={() => onSendDrawingToWhiteboard(dr)}
-                  className="w-full py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-500/30 text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer"
-                >
-                  <Send className="w-3 h-3" />
-                  <span>إرسال للطلاب 📡</span>
-                </button>
               </div>
             </div>
-          ))}
+          )}
         </div>
+
+        {/* Selected Lesson Preview & Broadcast Action Card */}
+        {activeDrawing && (
+          <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950/40 border border-slate-800 rounded-3xl p-4 sm:p-5 flex flex-col md:flex-row items-center justify-between gap-4 shadow-inner">
+            <div className="flex items-center gap-4 w-full md:w-auto">
+              {/* Large Thumbnail with White Background */}
+              <div className="w-20 h-20 sm:w-24 sm:h-24 bg-white rounded-2xl p-2 shadow-lg border border-slate-700 flex items-center justify-center shrink-0">
+                <img
+                  src={activeDrawing.imageUrl}
+                  alt={activeDrawing.title}
+                  className="max-h-full max-w-full object-contain filter drop-shadow-sm"
+                />
+              </div>
+
+              {/* Information */}
+              <div className="space-y-1 text-right min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="text-base sm:text-lg font-black text-white font-serif">
+                    {activeDrawing.title}
+                  </h4>
+                  <span className="text-[10px] font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700">
+                    {activeDrawing.titleEn || 'Lesson'}
+                  </span>
+                  {activeDrawing.steps && activeDrawing.steps.length > 0 && (
+                    <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full">
+                      {activeDrawing.steps.length} خطوات كتابة
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-slate-400 font-medium flex items-center gap-2 flex-wrap">
+                  <span>التصنيف: {activeDrawing.category === 'letters' ? 'حروف هجائية' : activeDrawing.category === 'shapes' ? 'أشكال' : 'مخصص'}</span>
+                  <span>•</span>
+                  <span>الدقة المطلوبة: {activeDrawing.targetAccuracy || 80}%</span>
+                  <span>•</span>
+                  <span>النقاط: {activeDrawing.points || 100} ⭐</span>
+                </div>
+                <div className="text-[11px] text-indigo-300 font-semibold flex items-center gap-1.5 pt-0.5">
+                  <Radio className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+                  <span>
+                    الهدف: {targetStudentId === 'all' ? `جميع الطلاب المتصلين (${connectedStudents.length})` : connectedStudents.find(s => s.id === targetStudentId)?.name || 'طالب محدد'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Direct Action Buttons */}
+            <div className="flex items-center gap-2.5 w-full md:w-auto justify-end">
+              {onSelectDrawing && (
+                <button
+                  type="button"
+                  onClick={() => onSelectDrawing(activeDrawing)}
+                  className="flex-1 md:flex-initial px-4 py-3 rounded-2xl bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+                  title="فتح سبورة الرسم التفاعلي للشرح والتجربة المباشرة"
+                >
+                  <PenTool className="w-4 h-4" />
+                  <span>رسم وشرح 🎨</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => handleSendSelectedLesson(activeDrawing)}
+                className="flex-1 md:flex-initial px-6 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-600 hover:from-indigo-500 hover:to-indigo-400 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/30 transition-all cursor-pointer active:scale-95"
+              >
+                <Send className="w-4 h-4" />
+                <span>إرسال للطلاب 📡</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
