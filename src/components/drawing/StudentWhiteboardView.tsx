@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { DrawingItem, DrawingResult } from '../../types';
 import { drawingEngineService, GUIDE_LINE_COLORS, ImageAnalysisResult } from '../../services/drawingEngineService';
 import { handTrackingService, HandData, PinchSensitivity, DrawingGestureMode } from '../../services/handTrackingService';
@@ -312,6 +312,37 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
       return { width: fitW, height: fitH };
     });
   }, [isMobileDevice, videoDims.aspect]);
+
+  // Exact rendered canvas bounding box inside stage container
+  // Guarantees zero offset for step points (green/red beacons) on mobile, tablet, and PC in portrait and landscape
+  const renderedCanvasBounds = useMemo(() => {
+    const cWidth = videoDims.width || 700;
+    const cHeight = videoDims.height || 520;
+    const canvasAspect = cWidth / cHeight;
+
+    const sWidth = stageDimensions.width || 700;
+    const sHeight = stageDimensions.height || 520;
+    const stageAspect = sWidth / sHeight;
+
+    let actualW = sWidth;
+    let actualH = sHeight;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (canvasAspect > stageAspect) {
+      actualW = sWidth;
+      actualH = sWidth / canvasAspect;
+      offsetX = 0;
+      offsetY = (sHeight - actualH) / 2;
+    } else {
+      actualH = sHeight;
+      actualW = sHeight * canvasAspect;
+      offsetX = (sWidth - actualW) / 2;
+      offsetY = 0;
+    }
+
+    return { actualW, actualH, offsetX, offsetY };
+  }, [videoDims.width, videoDims.height, stageDimensions.width, stageDimensions.height]);
 
   // Recalculate stage dimensions on resize, device orientation change, and video stream updates
   useEffect(() => {
@@ -2047,7 +2078,18 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
 
           {/* Layer 5: Interactive Arabic Letter Steps & Calligraphy Guidance Overlay */}
           {hasStepsGuide && steps.length > 0 && (
-            <div className="absolute inset-0 pointer-events-none z-35 overflow-hidden">
+            <div
+              style={{
+                position: 'absolute',
+                left: `${renderedCanvasBounds.offsetX}px`,
+                top: `${renderedCanvasBounds.offsetY}px`,
+                width: `${renderedCanvasBounds.actualW}px`,
+                height: `${renderedCanvasBounds.actualH}px`,
+                pointerEvents: 'none',
+                overflow: 'hidden'
+              }}
+              className="z-35"
+            >
               {/* Note: Connecting straight line removed as Arabic calligraphy has curved paths. Only start and end beacons remain. */}
 
               {/* Render Completed Step Badges (Muted green checkmarks) */}
@@ -2063,14 +2105,14 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
                     }}
                     className="absolute flex items-center justify-center pointer-events-none"
                   >
-                    <div className="w-6 h-6 rounded-full bg-emerald-500/80 border border-white text-slate-950 font-bold text-[10px] flex items-center justify-center shadow">
+                    <div className="w-5 h-5 rounded-full bg-emerald-500/80 border border-white text-slate-950 font-bold text-[9px] flex items-center justify-center shadow">
                       ✓
                     </div>
                   </div>
                 );
               })}
 
-              {/* Render Active Step Start Point 🟢 (Glowing Pulsing Beacon) */}
+              {/* Render Active Step Start Point 🟢 (Compact Glowing Beacon) */}
               {steps[currentStepIndex] && (
                 <div
                   style={{
@@ -2081,21 +2123,20 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
                   className="absolute flex items-center justify-center pointer-events-none transition-all duration-300"
                 >
                   <div className="relative flex items-center justify-center">
-                    {/* Outer animated ripple */}
-                    <span className="absolute w-12 h-12 rounded-full bg-emerald-400/50 animate-ping" />
-                    <span className="absolute w-16 h-16 rounded-full bg-emerald-500/20 animate-pulse" />
-                    {/* Inner core badge */}
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-600 to-emerald-400 border-2 border-white shadow-xl text-slate-950 font-black text-xs flex items-center justify-center ring-4 ring-emerald-400/40">
+                    {/* Subtle outer ripple */}
+                    <span className="absolute w-8 h-8 rounded-full bg-emerald-400/35 animate-ping" />
+                    {/* Compact core badge */}
+                    <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-gradient-to-tr from-emerald-600 to-emerald-400 border border-white shadow-lg text-slate-950 font-black text-[10px] flex items-center justify-center ring-2 ring-emerald-400/40">
                       {steps[currentStepIndex].stepNumber}
                     </div>
-                    <span className="absolute -bottom-5 bg-slate-950/90 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/40 whitespace-nowrap shadow-md font-bold">
-                      ابدأ هنا 🟢
+                    <span className="absolute -bottom-5 bg-slate-950/90 text-emerald-300 text-[9px] px-1.5 py-0.5 rounded-full border border-emerald-500/40 whitespace-nowrap shadow-md font-bold">
+                      ابدأ 🟢
                     </span>
                   </div>
                 </div>
               )}
 
-              {/* Render Active Step End Point 🎯 (Target Ring) */}
+              {/* Render Active Step End Point 🎯 (Compact Target Flag) */}
               {steps[currentStepIndex] && (
                 <div
                   style={{
@@ -2106,11 +2147,11 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
                   className="absolute flex items-center justify-center pointer-events-none transition-all duration-300"
                 >
                   <div className="relative flex items-center justify-center">
-                    <span className="absolute w-10 h-10 rounded-full border border-rose-400/60 animate-ping" />
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-rose-600 to-rose-400 border-2 border-white shadow-xl text-white font-black text-[11px] flex items-center justify-center ring-4 ring-rose-400/30">
+                    <span className="absolute w-7 h-7 rounded-full bg-rose-500/25 animate-pulse" />
+                    <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-gradient-to-tr from-rose-600 to-rose-400 border border-white shadow-lg text-white font-black text-[9px] flex items-center justify-center ring-2 ring-rose-400/30">
                       🎯
                     </div>
-                    <span className="absolute -bottom-5 bg-slate-950/90 text-rose-300 text-[10px] px-2 py-0.5 rounded-full border border-rose-500/40 whitespace-nowrap shadow-md font-bold">
+                    <span className="absolute -bottom-5 bg-slate-950/90 text-rose-300 text-[9px] px-1.5 py-0.5 rounded-full border border-rose-500/40 whitespace-nowrap shadow-md font-bold">
                       النهاية 🔴
                     </span>
                   </div>
