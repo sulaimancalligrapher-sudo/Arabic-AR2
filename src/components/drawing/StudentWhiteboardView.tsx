@@ -2105,14 +2105,14 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
                     }}
                     className="absolute flex items-center justify-center pointer-events-none"
                   >
-                    <div className="w-5 h-5 rounded-full bg-emerald-500/80 border border-white text-slate-950 font-bold text-[9px] flex items-center justify-center shadow">
+                    <div className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full bg-emerald-500/85 border border-white text-slate-950 font-bold text-[8px] flex items-center justify-center shadow">
                       ✓
                     </div>
                   </div>
                 );
               })}
 
-              {/* Render Active Step Start Point 🟢 (Compact Glowing Beacon) */}
+              {/* Render Active Step Start Point 🟢 (Micro Dot without number inside - Number placed in label) */}
               {steps[currentStepIndex] && (
                 <div
                   style={{
@@ -2124,19 +2124,18 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
                 >
                   <div className="relative flex items-center justify-center">
                     {/* Subtle outer ripple */}
-                    <span className="absolute w-8 h-8 rounded-full bg-emerald-400/35 animate-ping" />
-                    {/* Compact core badge */}
-                    <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-gradient-to-tr from-emerald-600 to-emerald-400 border border-white shadow-lg text-slate-950 font-black text-[10px] flex items-center justify-center ring-2 ring-emerald-400/40">
-                      {steps[currentStepIndex].stepNumber}
-                    </div>
-                    <span className="absolute -bottom-5 bg-slate-950/90 text-emerald-300 text-[9px] px-1.5 py-0.5 rounded-full border border-emerald-500/40 whitespace-nowrap shadow-md font-bold">
-                      ابدأ 🟢
+                    <span className="absolute w-5 h-5 rounded-full bg-emerald-400/35 animate-ping" />
+                    {/* Micro dot: clean, solid, no number inside */}
+                    <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-emerald-500 border border-white shadow-sm ring-2 ring-emerald-400/50" />
+                    {/* Step number combined with start label: ابدأ 1 🟢 */}
+                    <span className="absolute -bottom-5 bg-slate-950/95 text-emerald-300 font-bold text-[8.5px] sm:text-[9.5px] px-2 py-0.5 rounded-full border border-emerald-500/50 whitespace-nowrap shadow-md flex items-center gap-1">
+                      <span>ابدأ {steps[currentStepIndex].stepNumber} 🟢</span>
                     </span>
                   </div>
                 </div>
               )}
 
-              {/* Render Active Step End Point 🎯 (Compact Target Flag) */}
+              {/* Render Active Step End Point 🔴 (Micro Target Dot without number inside) */}
               {steps[currentStepIndex] && (
                 <div
                   style={{
@@ -2147,12 +2146,12 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
                   className="absolute flex items-center justify-center pointer-events-none transition-all duration-300"
                 >
                   <div className="relative flex items-center justify-center">
-                    <span className="absolute w-7 h-7 rounded-full bg-rose-500/25 animate-pulse" />
-                    <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-gradient-to-tr from-rose-600 to-rose-400 border border-white shadow-lg text-white font-black text-[9px] flex items-center justify-center ring-2 ring-rose-400/30">
-                      🎯
-                    </div>
-                    <span className="absolute -bottom-5 bg-slate-950/90 text-rose-300 text-[9px] px-1.5 py-0.5 rounded-full border border-rose-500/40 whitespace-nowrap shadow-md font-bold">
-                      النهاية 🔴
+                    <span className="absolute w-5 h-5 rounded-full bg-rose-500/25 animate-pulse" />
+                    {/* Micro dot: clean, solid, no icon or number inside */}
+                    <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-rose-500 border border-white shadow-sm ring-2 ring-rose-400/40" />
+                    {/* Step number combined with end label: نهاية 1 🔴 */}
+                    <span className="absolute -bottom-5 bg-slate-950/95 text-rose-300 font-bold text-[8.5px] sm:text-[9.5px] px-2 py-0.5 rounded-full border border-rose-500/50 whitespace-nowrap shadow-md">
+                      <span>نهاية {steps[currentStepIndex].stepNumber} 🔴</span>
                     </span>
                   </div>
                 </div>

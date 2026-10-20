@@ -34,6 +34,7 @@ import {
   Code
 } from 'lucide-react';
 import arDrawingCanvasRaw from './ARDrawingCanvas?raw';
+import studentWhiteboardViewRaw from './StudentWhiteboardView?raw';
 
 interface DrawingAdminModalProps {
   isOpen: boolean;
@@ -435,6 +436,26 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       setCopyFeedbackMsg('✅ تم تنزيل ملف ARDrawingCanvas.tsx بترميز UTF-8 أصلي وسليم!');
+      setTimeout(() => {
+        setCopyFeedbackMsg(null);
+      }, 5000);
+    } catch (e: any) {
+      alert('حدث خطأ أثناء تنزيل الملف: ' + (e?.message || 'خطأ غير معروف'));
+    }
+  };
+
+  const handleDownloadStudentWhiteboardFile = () => {
+    try {
+      const blob = new Blob([studentWhiteboardViewRaw], { type: 'text/typescript;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'StudentWhiteboardView.tsx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setCopyFeedbackMsg('✅ تم تنزيل ملف StudentWhiteboardView.tsx (شاشة الطالب والجوال) بنجاح!');
       setTimeout(() => {
         setCopyFeedbackMsg(null);
       }, 5000);
@@ -1173,13 +1194,11 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
                             >
                               <div className="relative flex items-center justify-center">
                                 {isActive && (
-                                  <span className="absolute w-8 h-8 rounded-full bg-emerald-400/40 animate-ping" />
+                                  <span className="absolute w-6 h-6 rounded-full bg-emerald-400/40 animate-ping" />
                                 )}
-                                <div className="w-6 h-6 rounded-full bg-emerald-500 border-2 border-white shadow-lg text-slate-950 font-black text-[11px] flex items-center justify-center">
-                                  {st.stepNumber}
-                                </div>
-                                <span className="absolute -bottom-4 bg-slate-950/90 text-emerald-300 text-[9px] px-1 rounded border border-emerald-500/30 whitespace-nowrap shadow-sm">
-                                  بداية {st.stepNumber} 🟢
+                                <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-emerald-500 border border-white shadow-sm ring-2 ring-emerald-400/50" />
+                                <span className="absolute -bottom-5 bg-slate-950/95 text-emerald-300 font-bold text-[8.5px] px-2 py-0.5 rounded-full border border-emerald-500/40 whitespace-nowrap shadow-md">
+                                  ابدأ {st.stepNumber} 🟢
                                 </span>
                               </div>
                             </div>
@@ -1196,11 +1215,9 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
                               }`}
                             >
                               <div className="relative flex items-center justify-center">
-                                <div className="w-6 h-6 rounded-full bg-rose-500 border-2 border-white shadow-lg text-white font-black text-[11px] flex items-center justify-center">
-                                  {st.stepNumber}
-                                </div>
-                                <span className="absolute -bottom-4 bg-slate-950/90 text-rose-300 text-[9px] px-1 rounded border border-rose-500/30 whitespace-nowrap shadow-sm">
-                                  نهاية {st.stepNumber} 🎯
+                                <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-rose-500 border border-white shadow-sm ring-2 ring-rose-400/40" />
+                                <span className="absolute -bottom-5 bg-slate-950/95 text-rose-300 font-bold text-[8.5px] px-2 py-0.5 rounded-full border border-rose-500/40 whitespace-nowrap shadow-md">
+                                  نهاية {st.stepNumber} 🔴
                                 </span>
                               </div>
                             </div>
@@ -1679,15 +1696,53 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
                   </button>
                 </div>
 
-                {/* Direct Download for ARDrawingCanvas.tsx (Solves Vercel UTF-8 and Skeleton Tracking Alignment) */}
+                {/* Deployment & Sync Guidance Banner */}
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-start gap-2.5 text-xs text-amber-200/90 text-right">
+                  <span className="text-base shrink-0">💡</span>
+                  <div className="space-y-1">
+                    <p className="font-bold text-amber-300">
+                      ملاحظة هامة لنشر التحديثات على GitHub و Vercel وتجربتها على الجوال والتابلت:
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-amber-200/80">
+                      • <strong>شاشة الجوال والتابلت للطلاب</strong> تعمل بواسطة ملف: <code className="bg-slate-900 px-1.5 py-0.5 rounded text-emerald-300 font-mono">StudentWhiteboardView.tsx</code>
+                      <br />
+                      • <strong>شاشة استوديو المعلم المباشر</strong> تعمل بواسطة ملف: <code className="bg-slate-900 px-1.5 py-0.5 rounded text-sky-300 font-mono">ARDrawingCanvas.tsx</code>
+                      <br />
+                      • <strong>قائمة الدروس والخطوات</strong> تحفظ في ملف: <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300 font-mono">drawingData.ts</code>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Direct Download for StudentWhiteboardView.tsx (Primary file for Student View on Mobile & Tablet: fixes points offset & scales down beacons) */}
+                <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-emerald-500/40 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+                  <div className="space-y-0.5 text-right w-full sm:w-auto">
+                    <div className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                      <Download className="w-4 h-4 text-emerald-400" />
+                      <span>تنزيل ملف صفحة الطالب والجوال (StudentWhiteboardView.tsx) 📱</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300">
+                      <strong>الملف الأساسي المسؤول عن تجربة الجوال والتابلت</strong>: يحل مشكلة انزياح النقاط نهائياً ويثبتها على الحرف، ويصغر النقاط ويضيف رقم الخطوة للنص.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDownloadStudentWhiteboardFile}
+                    className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all active:scale-95 shrink-0"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>تنزيل StudentWhiteboardView.tsx 📥</span>
+                  </button>
+                </div>
+
+                {/* Direct Download for ARDrawingCanvas.tsx (Solves Vercel UTF-8 and Teacher Hand Tracking Alignment) */}
                 <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-sky-500/30 flex flex-col sm:flex-row items-center justify-between gap-3">
                   <div className="space-y-0.5 text-right w-full sm:w-auto">
                     <div className="text-xs font-bold text-sky-300 flex items-center gap-1.5">
                       <Download className="w-4 h-4 text-sky-400" />
-                      <span>تنزيل ملف الكانفاس المحدث (ARDrawingCanvas.tsx)</span>
+                      <span>تنزيل ملف استوديو المعلم (ARDrawingCanvas.tsx) 💻</span>
                     </div>
                     <p className="text-[11px] text-slate-400">
-                      محفوظ بترميز UTF-8 نقي 100% لمعالجة خطأ Vercel وضمان تطابق هيكل اليد تماماً مع الكاميرا.
+                      محفوظ بترميز UTF-8 نقي لمعالجة خطأ Vercel وضمان تطابق هيكل اليد تماماً مع الكاميرا.
                     </p>
                   </div>
                   <button
