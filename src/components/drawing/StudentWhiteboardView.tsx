@@ -1991,8 +1991,7 @@ export const StudentWhiteboardView: React.FC<StudentWhiteboardViewProps> = ({
             }`}
             style={{
               filter: 'brightness(1.05) contrast(1.1) saturate(1.2)',
-              imageRendering: '-webkit-optimize-contrast' as any,
-              transform: 'scaleX(-1) translateZ(0)'
+              imageRendering: '-webkit-optimize-contrast' as any
             }}
           />
 

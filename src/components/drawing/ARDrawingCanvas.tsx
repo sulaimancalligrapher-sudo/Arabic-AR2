@@ -1579,8 +1579,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
             }`}
             style={{
               filter: `brightness(${brightness}) contrast(1.1) saturate(1.2)`,
-              imageRendering: '-webkit-optimize-contrast' as any,
-              transform: 'scaleX(-1) translateZ(0)'
+              imageRendering: '-webkit-optimize-contrast' as any
             }}
           />
 
@@ -1893,7 +1892,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
           {/* Achievement Toast (If Target Accuracy is reached) */}
           {coverage >= drawing.targetAccuracy && !stepAlert && (
             <div className="mt-1 bg-emerald-950/90 border border-emerald-500/60 text-emerald-200 px-3 py-0.5 rounded-full text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-lg mx-auto w-max animate-in fade-in">
-              <span>🏆 تم تحقيق نسبة الإتقان المطلوبة ({coverage}%)! انقر «إنهاء» لحفظ نتيجتك.</span>
+              <span>������ تم تحقيق نسبة الإتقان المطلوبة ({coverage}%)! انقر «إنهاء» لحفظ نتيجتك.</span>
             </div>
           )}
         </div>

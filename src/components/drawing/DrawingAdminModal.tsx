@@ -27,17 +27,12 @@ import {
   ArrowRight,
   RotateCcw,
   Compass,
-  Share2,
-  QrCode,
   Copy,
   Download,
-  FileUp,
-  Smartphone,
   Globe,
   CheckCheck,
   Code
 } from 'lucide-react';
-import QRCode from 'qrcode';
 
 interface DrawingAdminModalProps {
   isOpen: boolean;
@@ -56,18 +51,12 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
   const [editingDrawingId, setEditingDrawingId] = useState<string | null>(null);
   const [showGuidelines, setShowGuidelines] = useState(true);
 
-  // Multi-Device Sharing & Sync States
-  const [shareSelectedDrawing, setShareSelectedDrawing] = useState<DrawingItem | null>(null);
-  const [copiedShareUrl, setCopiedShareUrl] = useState(false);
+  // Permanent GitHub & Vercel Code States
   const [githubCodeCopied, setGithubCodeCopied] = useState(false);
   const [fileDownloaded, setFileDownloaded] = useState(false);
   const [showCodeBox, setShowCodeBox] = useState(false);
-  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
-  const [qrCodeTooLarge, setQrCodeTooLarge] = useState<boolean>(false);
   const [copyFeedbackMsg, setCopyFeedbackMsg] = useState<string | null>(null);
   const codeTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const [importResult, setImportResult] = useState<{ success: boolean; message: string } | null>(null);
-  const jsonFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Student Whiteboard Controls State (Request 3)
   const [showStudentInputToggle, setShowStudentInputToggle] = useState<boolean>(() => {
@@ -274,47 +263,6 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
     }
   }, [isOpen, initialEditingDrawingId]);
 
-  // Generate QR Code locally and reliably without external network dependencies
-  useEffect(() => {
-    if (activeTab === 'multi_device') {
-      const targetItem = shareSelectedDrawing || customList[0] || allDrawingsList[0];
-      if (!targetItem) {
-        setQrCodeDataUrl(null);
-        setQrCodeTooLarge(false);
-        return;
-      }
-      try {
-        const shareUrl = drawingEngineService.getShareUrlForLesson(targetItem);
-        // QR Code physical maximum in binary mode is ~2900 bytes. If URL is very long, warn gracefully.
-        if (shareUrl.length > 2400) {
-          setQrCodeDataUrl(null);
-          setQrCodeTooLarge(true);
-        } else {
-          setQrCodeTooLarge(false);
-          QRCode.toDataURL(shareUrl, {
-            width: 240,
-            margin: 1,
-            color: {
-              dark: '#020617',
-              light: '#ffffff'
-            },
-            errorCorrectionLevel: 'L'
-          })
-            .then((dataUrl) => {
-              setQrCodeDataUrl(dataUrl);
-              setQrCodeTooLarge(false);
-            })
-            .catch(() => {
-              setQrCodeDataUrl(null);
-              setQrCodeTooLarge(true);
-            });
-        }
-      } catch {
-        setQrCodeDataUrl(null);
-        setQrCodeTooLarge(true);
-      }
-    }
-  }, [activeTab, shareSelectedDrawing, customList, allDrawingsList]);
 
   const handleCancelEdit = () => {
     resetForm();
@@ -420,74 +368,6 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
       if (orig) handleStartEdit(orig);
     }
     onDrawingsUpdated();
-  };
-
-  const handleCopyShareUrl = (item: DrawingItem) => {
-    try {
-      const url = drawingEngineService.getShareUrlForLesson(item);
-      if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(url)
-          .then(() => {
-            setCopiedShareUrl(true);
-            setTimeout(() => setCopiedShareUrl(false), 2500);
-          })
-          .catch(() => {
-            const ok = fallbackCopyText(url);
-            if (ok) {
-              setCopiedShareUrl(true);
-              setTimeout(() => setCopiedShareUrl(false), 2500);
-            }
-          });
-      } else {
-        const ok = fallbackCopyText(url);
-        if (ok) {
-          setCopiedShareUrl(true);
-          setTimeout(() => setCopiedShareUrl(false), 2500);
-        }
-      }
-    } catch (err: any) {
-      console.error(err);
-    }
-  };
-
-  const handleExportJson = () => {
-    try {
-      const jsonStr = drawingEngineService.exportAllDrawingsJson();
-      const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `baseera_drawings_backup_${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      alert('حدث خطأ أثناء التصدير: ' + (e?.message || 'خطأ غير معروف'));
-    }
-  };
-
-  const handleImportJsonFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (content) {
-        const result = drawingEngineService.importDrawingsFromJson(content);
-        if (result.errors.length > 0) {
-          setImportResult({ success: false, message: result.errors.join(' | ') });
-        } else {
-          setImportResult({ success: true, message: `🎉 تم استيراد ${result.importedCount} درساً بنجاح وحفظها في هذا الجهاز!` });
-          refreshDrawingsList();
-          onDrawingsUpdated();
-        }
-        setTimeout(() => setImportResult(null), 4000);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
   };
 
   const fallbackCopyText = (text: string): boolean => {
@@ -686,8 +566,8 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
                 : 'border-transparent text-slate-400 hover:text-white'
             }`}
           >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>مشاركة ومزامنة الأجهزة (Vercel & QR) 📲</span>
+            <Globe className="w-3.5 h-3.5" />
+            <span>تثبيت الدروس لـ GitHub و Vercel 📥</span>
           </button>
 
           <button
@@ -1511,18 +1391,17 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-                        {/* Share & QR Button */}
+                        {/* Install & Download Code Button */}
                         <button
                           type="button"
                           onClick={() => {
-                            setShareSelectedDrawing(item);
                             setActiveTab('multi_device');
                           }}
-                          className="px-2.5 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500 hover:text-slate-950 text-sky-300 border border-sky-500/30 transition-colors flex items-center gap-1 text-xs font-bold cursor-pointer"
-                          title="مشاركة هذا الدرس برابط سريع أو رمز QR لأي جوال أو تابلت"
+                          className="px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500 hover:text-slate-950 text-emerald-300 border border-emerald-500/30 transition-colors flex items-center gap-1 text-xs font-bold cursor-pointer"
+                          title="تنزيل ملف drawingData.ts لتثبيت الدروس في Vercel و GitHub لجميع الأجهزة"
                         >
-                          <Share2 className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">مشاركة و QR</span>
+                          <Download className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">تنزيل وتثبيت الكود 📥</span>
                         </button>
 
                         {/* Step Maker Shortcut Button */}
@@ -1689,216 +1568,19 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
             </div>
           )}
 
-          {/* Tab: Multi-Device Sync, QR Sharing & GitHub/Vercel Integration */}
+          {/* Tab: Permanent GitHub & Vercel Integration (الحل الأنسب والوحيد المعتمد) */}
           {activeTab === 'multi_device' && (
-            <div className="space-y-6 text-xs animate-in fade-in duration-200">
+            <div className="space-y-5 text-xs animate-in fade-in duration-200">
               
-              {/* Educational Explanation Banner */}
-              <div className="p-4 rounded-2xl bg-amber-950/40 border border-amber-500/50 space-y-2.5">
-                <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
-                  <Globe className="w-4 h-4 shrink-0" />
-                  <span>حل مشكلة ظهور الدروس الجديدة على الأجهزة المختلفة (جوال / تابلت)</span>
+              {/* Header Explanation Banner */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/50 via-slate-900 to-slate-900 border border-emerald-500/40 space-y-2">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                  <Globe className="w-5 h-5 shrink-0" />
+                  <span>تثبيت جميع الدروس والنقاط في موقعك (Vercel & GitHub)</span>
                 </div>
                 <p className="text-slate-300 leading-relaxed text-xs">
-                  عند إضافة درس جديد في المتصفح، يتم حفظه محلياً في ذاكرة جهازك الحالي (<code className="text-amber-300 bg-slate-900 px-1.5 py-0.5 rounded font-mono">localStorage</code>). لذلك عند فتح رابط موقع Vercel على جهاز آخر، تكون مكتبة الدروس المخصصة فارغة افتراضياً.
+                  هذا هو <strong>الحل الأنسب والنهائي</strong>: يتم تنزيل ملف بيانات الدروس كاملاً بنقرة زر واحدة واستبداله في كود مشروعك، ثم رفعه إلى GitHub. سيقوم موقع Vercel بالنشر التلقائي فوراً، لتصبح جميع الدروس الجديدة ونقاطها ظاهرة رسمياً وتلقائياً لكل طالب ولكل جهاز (جوال، تابلت، كمبيوتر) يفتح الرابط دون أي روابط أو تعقيد.
                 </p>
-                <div className="text-[11px] text-amber-200/90 font-medium">
-                  ✨ <strong>لديك 3 طرق سهلة وسريعة لفتح الدروس على أي جوال أو تابلت:</strong>
-                </div>
-              </div>
-
-              {/* Solution 1: Direct Link & QR Code */}
-              <div className="p-5 rounded-3xl bg-slate-800/80 border border-slate-700 space-y-4 shadow-xl">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
-                      <Share2 className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-bold text-white font-serif">
-                        الطريقة الأولى: مشاركة الدرس برابط سريع أو رمز QR (فوري)
-                      </h4>
-                      <p className="text-[11px] text-slate-400">
-                        افتح الرابط في أي جهاز أو امسح الرمز بالكاميرا ليتم استيراد الدرس وحفظه فوراً على ذلك الجهاز!
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Select which lesson to share */}
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-300 block">
-                    اختر الدرس المراد مشاركته للجوال أو التابلت:
-                  </label>
-                  <select
-                    value={shareSelectedDrawing?.id || (customList[0]?.id || allDrawingsList[0]?.id || '')}
-                    onChange={(e) => {
-                      const found = allDrawingsList.find(d => d.id === e.target.value);
-                      if (found) setShareSelectedDrawing(found);
-                    }}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-medium focus:border-amber-400 focus:outline-none"
-                  >
-                    {allDrawingsList.map(d => (
-                      <option key={d.id} value={d.id}>
-                        {d.title} {d.isCustom ? '📁 (مخصص)' : '🏛️ (افتراضي)'} {d.steps ? `· ${d.steps.length} خطوات` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Display Share Link & Copy Button */}
-                {(() => {
-                  const targetItem = shareSelectedDrawing || customList[0] || allDrawingsList[0];
-                  if (!targetItem) return null;
-                  const shareUrl = drawingEngineService.getShareUrlForLesson(targetItem);
-                  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=10&data=${encodeURIComponent(shareUrl)}`;
-
-                  return (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 items-center bg-slate-950/70 p-4 rounded-2xl border border-slate-800">
-                      
-                      {/* Left 2 Cols: Link & Copy */}
-                      <div className="md:col-span-2 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <img
-                            src={targetItem.imageUrl}
-                            alt={targetItem.title}
-                            className="w-10 h-10 rounded-lg object-contain bg-white p-1 shrink-0 border border-slate-700"
-                          />
-                          <div>
-                            <div className="font-bold text-white text-xs">{targetItem.title}</div>
-                            <div className="text-[10px] text-slate-400">
-                              {targetItem.steps?.length ? `${targetItem.steps.length} خطوات رسم مرقمة ومضبوطة` : 'رسمة وتمرين تتبع'}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            readOnly
-                            value={shareUrl}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-[11px] font-mono text-slate-300 truncate select-all"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleCopyShareUrl(targetItem)}
-                            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all cursor-pointer ${
-                              copiedShareUrl
-                                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 ring-2 ring-emerald-400'
-                                : 'bg-sky-600 hover:bg-sky-500 text-white shadow'
-                            }`}
-                          >
-                            {copiedShareUrl ? (
-                              <>
-                                <CheckCheck className="w-3.5 h-3.5" />
-                                <span>تم النسخ! ✓</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="w-3.5 h-3.5" />
-                                <span>نسخ الرابط 📋</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                        <p className="text-[10px] text-slate-400">
-                          📌 أرسل الرابط عبر واتساب، أو افتحه في متصفح سفاري/كروم على الآيباد والجوال ليتم تنزيله فوراً.
-                        </p>
-                      </div>
-
-                      {/* Right Col: Local Instant QR Code (Generated Client-Side Offline) */}
-                      <div className="flex flex-col items-center justify-center p-3 bg-white rounded-2xl shadow-lg border border-slate-700 text-center min-h-[170px]">
-                        {qrCodeDataUrl ? (
-                          <>
-                            <img
-                              src={qrCodeDataUrl}
-                              alt="QR Code"
-                              className="w-36 h-36 object-contain"
-                            />
-                            <div className="text-[10px] font-bold text-slate-900 mt-1 flex items-center gap-1">
-                              <QrCode className="w-3 h-3 text-sky-600" />
-                              <span>امسح بكاميرا الجوال / التابلت</span>
-                            </div>
-                          </>
-                        ) : qrCodeTooLarge ? (
-                          <div className="p-2 space-y-1.5 text-center text-slate-700">
-                            <QrCode className="w-8 h-8 text-amber-500 mx-auto" />
-                            <div className="text-[11px] font-bold text-slate-900">
-                              تفاصيل الدرس تتجاوز سعة QR
-                            </div>
-                            <p className="text-[10px] text-slate-600 leading-tight">
-                              بيانات ورسمة هذا الدرس دقيقة ومفصلة. استخدم زر <strong>«نسخ الرابط 📋»</strong> للمشاركة عبر واتساب، أو <strong>«الحل الأنسب»</strong> أدناه.
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="text-[11px] text-slate-500 flex items-center gap-1.5 py-8">
-                            <span className="animate-spin text-base">⏳</span>
-                            <span>جارٍ تجهيز الرمز...</span>
-                          </div>
-                        )}
-                      </div>
-
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Solution 2: Backup Export & Import (JSON) */}
-              <div className="p-5 rounded-3xl bg-slate-800/80 border border-slate-700 space-y-3.5 shadow-xl">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
-                    <FileUp className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white font-serif">
-                      الطريقة الثانية: تصدير واستيراد ملف الدروس كملف (JSON Backup)
-                    </h4>
-                    <p className="text-[11px] text-slate-400">
-                      صدّر جميع الدروس في ملف واحد، ثم افتح الموقع في الجهاز الآخر وانقر «استيراد».
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={handleExportJson}
-                    className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-md transition-all"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>تصدير جميع الدروس كملف (JSON) 📥</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => jsonFileInputRef.current?.click()}
-                    className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center gap-2 cursor-pointer border border-slate-600 transition-all"
-                  >
-                    <FileUp className="w-4 h-4 text-purple-300" />
-                    <span>استيراد ملف دروس (JSON) 📤</span>
-                  </button>
-
-                  <input
-                    type="file"
-                    ref={jsonFileInputRef}
-                    accept=".json,application/json"
-                    onChange={handleImportJsonFile}
-                    className="hidden"
-                  />
-                </div>
-
-                {importResult && (
-                  <div
-                    className={`p-3 rounded-xl border text-xs font-bold animate-in fade-in flex items-center gap-2 ${
-                      importResult.success
-                        ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-200'
-                        : 'bg-rose-950/80 border-rose-500/50 text-rose-200'
-                    }`}
-                  >
-                    {importResult.success ? <CheckCheck className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
-                    <span>{importResult.message}</span>
-                  </div>
-                )}
               </div>
 
               {/* Solution 3: Permanent Integration into GitHub & Vercel */}
