@@ -33,6 +33,7 @@ import {
   CheckCheck,
   Code
 } from 'lucide-react';
+import arDrawingCanvasRaw from './ARDrawingCanvas?raw';
 
 interface DrawingAdminModalProps {
   isOpen: boolean;
@@ -415,6 +416,26 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
       setCopyFeedbackMsg('✅ تم تنزيل ملف drawingData.ts بنجاح إلى مجلد التنزيلات!');
       setTimeout(() => {
         setFileDownloaded(false);
+        setCopyFeedbackMsg(null);
+      }, 5000);
+    } catch (e: any) {
+      alert('حدث خطأ أثناء تنزيل الملف: ' + (e?.message || 'خطأ غير معروف'));
+    }
+  };
+
+  const handleDownloadARCanvasFile = () => {
+    try {
+      const blob = new Blob([arDrawingCanvasRaw], { type: 'text/typescript;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ARDrawingCanvas.tsx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setCopyFeedbackMsg('✅ تم تنزيل ملف ARDrawingCanvas.tsx بترميز UTF-8 أصلي وسليم!');
+      setTimeout(() => {
         setCopyFeedbackMsg(null);
       }, 5000);
     } catch (e: any) {
@@ -1655,6 +1676,27 @@ export const DrawingAdminModal: React.FC<DrawingAdminModalProps> = ({
                   >
                     <Code className="w-4 h-4 text-sky-400" />
                     <span>{showCodeBox ? 'إخفاء محتوى الكود' : 'معاينة محتوى الكود 🔍'}</span>
+                  </button>
+                </div>
+
+                {/* Direct Download for ARDrawingCanvas.tsx (Solves Vercel UTF-8 and Skeleton Tracking Alignment) */}
+                <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-sky-500/30 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="space-y-0.5 text-right w-full sm:w-auto">
+                    <div className="text-xs font-bold text-sky-300 flex items-center gap-1.5">
+                      <Download className="w-4 h-4 text-sky-400" />
+                      <span>تنزيل ملف الكانفاس المحدث (ARDrawingCanvas.tsx)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      محفوظ بترميز UTF-8 نقي 100% لمعالجة خطأ Vercel وضمان تطابق هيكل اليد تماماً مع الكاميرا.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDownloadARCanvasFile}
+                    className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all active:scale-95 shrink-0"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>تنزيل ARDrawingCanvas.tsx 📥</span>
                   </button>
                 </div>
 

@@ -697,6 +697,17 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
 
   // Hand update callback
   const handleHandUpdate = useCallback((data: HandData) => {
+    // Dynamically synchronize canvas & stage dimensions with actual live camera aspect ratio
+    if (data.videoDimensions && data.videoDimensions.width > 0) {
+      const { width, height, aspect } = data.videoDimensions;
+      setVideoDimensions(prev => {
+        if (prev.width !== width || prev.height !== height) {
+          return { width, height, aspect };
+        }
+        return prev;
+      });
+    }
+
     if (!containerRef.current || !analysisRef.current) return;
 
     const currentMode = gestureModeRef.current;
@@ -1892,7 +1903,7 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
           {/* Achievement Toast (If Target Accuracy is reached) */}
           {coverage >= drawing.targetAccuracy && !stepAlert && (
             <div className="mt-1 bg-emerald-950/90 border border-emerald-500/60 text-emerald-200 px-3 py-0.5 rounded-full text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-lg mx-auto w-max animate-in fade-in">
-              <span>������ تم تحقيق نسبة الإتقان المطلوبة ({coverage}%)! انقر «إنهاء» لحفظ نتيجتك.</span>
+              <span>🏆 تم تحقيق نسبة الإتقان المطلوبة ({coverage}%)! انقر «إنهاء» لحفظ نتيجتك.</span>
             </div>
           )}
         </div>

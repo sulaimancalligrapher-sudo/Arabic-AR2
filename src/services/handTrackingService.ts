@@ -442,7 +442,8 @@ class HandTrackingService {
         if (this.videoElement!.videoWidth > 0 && this.videoElement!.videoHeight > 0) {
           resolve();
         } else {
-          this.videoElement!.onloadedmetadata = () => resolve();
+          this.videoElement!.addEventListener('loadedmetadata', () => resolve(), { once: true });
+          setTimeout(resolve, 600);
         }
       });
 
