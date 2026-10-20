@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { DrawingItem, DrawingResult, StudentProfile } from '../../types';
 import { handTrackingService, HandData, PinchSensitivity } from '../../services/handTrackingService';
 import { audioService } from '../../services/audioService';
@@ -252,6 +252,37 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
       screen.orientation?.removeEventListener?.('change', handleResize);
     };
   }, [updateStageDimensions]);
+
+  // Exact rendered canvas bounding box inside stage container
+  // Guarantees zero offset for step points (green/red beacons) across all screen sizes and aspect ratios
+  const renderedCanvasBounds = useMemo(() => {
+    const cWidth = videoDimensions.width || 700;
+    const cHeight = videoDimensions.height || 520;
+    const canvasAspect = cWidth / cHeight;
+
+    const sWidth = stageDimensions.width || 700;
+    const sHeight = stageDimensions.height || 520;
+    const stageAspect = sWidth / sHeight;
+
+    let actualW = sWidth;
+    let actualH = sHeight;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (canvasAspect > stageAspect) {
+      actualW = sWidth;
+      actualH = sWidth / canvasAspect;
+      offsetX = 0;
+      offsetY = (sHeight - actualH) / 2;
+    } else {
+      actualH = sHeight;
+      actualW = sHeight * canvasAspect;
+      offsetX = (sWidth - actualW) / 2;
+      offsetY = 0;
+    }
+
+    return { actualW, actualH, offsetX, offsetY };
+  }, [videoDimensions.width, videoDimensions.height, stageDimensions.width, stageDimensions.height]);
 
   // State Refs to prevent 60FPS loop stale closures
   const isPenDownRef = useRef(false);
@@ -1651,7 +1682,18 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
 
           {/* Layer 5: Interactive Arabic Letter Steps & Calligraphy Guidance Overlay */}
           {hasStepsGuide && steps.length > 0 && (
-            <div className="absolute inset-0 pointer-events-none z-35 overflow-hidden">
+            <div
+              style={{
+                position: 'absolute',
+                left: `${renderedCanvasBounds.offsetX}px`,
+                top: `${renderedCanvasBounds.offsetY}px`,
+                width: `${renderedCanvasBounds.actualW}px`,
+                height: `${renderedCanvasBounds.actualH}px`,
+                pointerEvents: 'none',
+                overflow: 'hidden'
+              }}
+              className="z-35"
+            >
               {/* Note: Connecting straight line removed as Arabic calligraphy has curved paths. Only start and end beacons remain. */}
 
               {/* Render Completed Step Badges (Muted green checkmarks) */}
@@ -1667,14 +1709,14 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
                     }}
                     className="absolute flex items-center justify-center pointer-events-none"
                   >
-                    <div className="w-6 h-6 rounded-full bg-emerald-500/80 border border-white text-slate-950 font-bold text-[10px] flex items-center justify-center shadow">
+                    <div className="w-5 h-5 rounded-full bg-emerald-500/80 border border-white text-slate-950 font-bold text-[9px] flex items-center justify-center shadow">
                       ✓
                     </div>
                   </div>
                 );
               })}
 
-              {/* Render Active Step Start Point 🟢 (Glowing Pulsing Beacon) */}
+              {/* Render Active Step Start Point 🟢 (Compact Glowing Beacon) */}
               {steps[currentStepIndex] && (
                 <div
                   style={{
@@ -1685,23 +1727,21 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
                   className="absolute flex items-center justify-center pointer-events-none transition-all duration-300"
                 >
                   <div className="relative flex items-center justify-center">
-                    {/* Outer animated ripple */}
-                    <span className="absolute w-12 h-12 rounded-full bg-emerald-400/50 animate-ping" />
-                    <span className="absolute w-16 h-16 rounded-full bg-emerald-500/20 animate-pulse" />
-                    {/* Inner core badge */}
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-600 to-emerald-400 border-2 border-white shadow-xl text-slate-950 font-black text-xs flex items-center justify-center ring-4 ring-emerald-400/40">
+                    {/* Subtle outer ripple */}
+                    <span className="absolute w-8 h-8 rounded-full bg-emerald-400/35 animate-ping" />
+                    {/* Compact core badge */}
+                    <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-gradient-to-tr from-emerald-600 to-emerald-400 border border-white shadow-lg text-slate-950 font-black text-[10px] flex items-center justify-center ring-2 ring-emerald-400/40">
                       {steps[currentStepIndex].stepNumber}
                     </div>
-                    {/* Floating label */}
-                    <div className="absolute -bottom-6 bg-slate-950/90 text-emerald-300 font-bold text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/40 shadow-lg whitespace-nowrap flex items-center gap-1 backdrop-blur-sm">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      <span>ابدأ من هنا 🟢</span>
+                    {/* Compact floating label */}
+                    <div className="absolute -bottom-5 bg-slate-950/90 text-emerald-300 font-bold text-[9px] px-1.5 py-0.5 rounded-full border border-emerald-500/40 shadow-md whitespace-nowrap flex items-center gap-1 backdrop-blur-xs">
+                      <span>ابدأ 🟢</span>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Render Active Step End Point 🎯 (Target Flag) */}
+              {/* Render Active Step End Point 🎯 (Compact Target Flag) */}
               {steps[currentStepIndex] && (
                 <div
                   style={{
@@ -1712,12 +1752,12 @@ export const ARDrawingCanvas: React.FC<ARDrawingCanvasProps> = ({
                   className="absolute flex items-center justify-center pointer-events-none transition-all duration-300"
                 >
                   <div className="relative flex items-center justify-center">
-                    <span className="absolute w-10 h-10 rounded-full bg-rose-500/30 animate-pulse" />
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-rose-600 to-amber-500 border-2 border-white shadow-xl text-white font-black text-[11px] flex items-center justify-center ring-2 ring-rose-400/30">
+                    <span className="absolute w-7 h-7 rounded-full bg-rose-500/25 animate-pulse" />
+                    <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-gradient-to-tr from-rose-600 to-rose-400 border border-white shadow-lg text-white font-black text-[9px] flex items-center justify-center ring-2 ring-rose-400/30">
                       🎯
                     </div>
-                    <div className="absolute -bottom-6 bg-slate-950/90 text-rose-300 font-bold text-[10px] px-2 py-0.5 rounded-full border border-rose-500/40 shadow-lg whitespace-nowrap backdrop-blur-sm">
-                      نهاية الخطوة 🎯
+                    <div className="absolute -bottom-5 bg-slate-950/90 text-rose-300 font-bold text-[9px] px-1.5 py-0.5 rounded-full border border-rose-500/40 shadow-md whitespace-nowrap backdrop-blur-xs">
+                      <span>النهاية 🔴</span>
                     </div>
                   </div>
                 </div>
